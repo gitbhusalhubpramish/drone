@@ -114,6 +114,31 @@ void loop() {
   int hi = 2000;
   int lo = 1000;
   int mid = 1500;
-
-  
+  rbtn = pulseIn(rsig, HIGH);
+  lbtn = pulseIn(lsig, HIGH);
+  bbtn = pulseIn(bsig, HIGH);
+  fbtn = pulseIn(fsig, HIGH);
+  rclk = rbtn > 1700;
+  lclk = lbtn > 1700;
+  fclk = fbtn > 1700;
+  bclk = bbtn > 1700;
+  if (rclk && lclk){
+    ychange(lo);
+  }else if(fclk && bclk){
+    ychange(hi);
+  }else if (fclk && rclk){
+    clockwise(mid, lo);
+  }else if (bclk && lclk){
+    anticlockwise(mid, lo);
+  }else if (rclk){
+    rightward(mid, lo);
+  }else if (lclk){
+    leftward(mid, lo);
+  }else if (fclk){
+    forward(mid, lo);
+  }else if (bclk){
+    backward(mid, lo);
+  }else{
+    ychange(mid);
+  }
 }
