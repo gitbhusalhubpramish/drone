@@ -1,0 +1,135 @@
+#include <Wire.h>
+#include <MPU6050.h>
+#include <Servo.h>
+
+// ====== YOUR EXISTING MOTOR SETUP ======
+#define lsig 2
+#define rsig 4
+#define fsig 7
+#define bsig 8
+Servo m1, m2, m3, m4;
+const int dm1 = 9;
+const int dm2 = 10;
+const int dm3 = 11;
+const int dm4 = 6;
+
+// ====== GYRO VARIABLES ======
+MPU6050 mpu;
+float pitch, roll;
+float Kp = 2.0;  // Correction strength
+
+// ====== BUTTON STATE ======
+int rbtn, lbtn, fbtn, bbtn;
+bool rclk = false, lclk = false, fclk = false, bclk = false;
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+
+  // Gyro init
+  mpu.initialize();
+  if (!mpu.testConnection()) {
+    Serial.println("MPU6050 connection failed!");
+    while (1);
+  }
+  Serial.println("MPU6050 ready.");
+
+  // Attach motors
+  m1.attach(dm1);
+  m2.attach(dm2);
+  m3.attach(dm3);
+  m4.attach(dm4);
+
+  // Button inputs
+  pinMode(lsig, INPUT);
+  pinMode(rsig, INPUT);
+  pinMode(fsig, INPUT);
+  pinMode(bsig, INPUT);
+
+  // ESC arming
+  m1.writeMicroseconds(1000);
+  m2.writeMicroseconds(1000);
+  m3.writeMicroseconds(1000);
+  m4.writeMicroseconds(1000);
+  delay(2000);
+}
+
+void setMotors(int sp1, int sp2, int sp3, int sp4) {
+  m1.writeMicroseconds(sp1);
+  m2.writeMicroseconds(sp2);
+  m3.writeMicroseconds(sp3);
+  m4.writeMicroseconds(sp4);
+}
+
+void loop() {
+  int hi = 2000;
+  int lo = 1000;
+  int mid = 1500;
+
+  // Read buttons
+  rbtn = pulseIn(rsig, HIGH);
+  lbtn = pulseIn(lsig, HIGH);
+  bbtn = pulseIn(bsig, HIGH);
+  fbtn = pulseIn(fsig, HIGH);
+  rclk = rbtn > 1700;
+  lclk = lbtn > 1700;
+  fclk = fbtn > 1700;
+  bclk = bbtn > 1700;
+
+  // ===== GYRO READING =====
+  int16_t ax, ay, az, gx, gy, gz;
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+  // Convert to pitch & roll (basic calculation)
+  pitch = atan2(ax, sqrt(ay * ay + az * az)) * 180 / PI;
+  roll  = atan2(ay, sqrt(ax * ax + az * az)) * 180 / PI;
+
+  // ===== STABILIZATION =====
+  int pitchCorrection = Kp * pitch;  // Positive = nose up
+  int rollCorrection  = Kp * roll;   // Positive = tilt right
+
+  // Base speeds
+  int sp1 = mid - pitchCorrection + rollCorrection; // Front-left
+  int sp2 = mid - pitchCorrection - rollCorrection; // Front-right
+  int sp3 = mid + pitchCorrection + rollCorrection; // Back-left
+  int sp4 = mid + pitchCorrection - rollCorrection; // Back-right
+
+  // ===== MANUAL CONTROL PRIORITY =====
+  if (rclk && lclk) {
+    sp1 = sp2 = sp3 = sp4 = lo;
+  } else if (fclk && bclk) {
+    sp1 = sp2 = sp3 = sp4 = hi;
+  } else if (fclk && rclk) {
+    sp1 = sp3 = mid;
+    sp2 = sp4 = lo;
+  } else if (bclk && lclk) {
+    sp1 = sp3 = lo;
+    sp2 = sp4 = mid;
+  } else if (rclk) {
+    sp2 = sp4 = lo;
+    sp1 = sp3 = mid;
+  } else if (lclk) {
+    sp1 = sp3 = lo;
+    sp2 = sp4 = mid;
+  } else if (fclk) {
+    sp1 = sp2 = lo;
+    sp3 = sp4 = mid;
+  } else if (bclk) {
+    sp1 = sp2 = mid;
+    sp3 = sp4 = lo;
+  }
+
+  // Send to motors
+  setMotors(sp1, sp2, sp3, sp4);
+
+  // Debug
+  Serial.print("Pitch: "); Serial.print(pitch);
+  Serial.print(" | Roll: "); Serial.print(roll);
+  Serial.print(" | Motors: ");
+  Serial.print(sp1); Serial.print(", ");
+  Serial.print(sp2); Serial.print(", ");
+  Serial.print(sp3); Serial.print(", ");
+  Serial.println(sp4);
+
+  delay(20); // Small loop delay
+}
