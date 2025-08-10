@@ -21,8 +21,10 @@ const int dm4 = 6;
 
 // ===== GYRO VARIABLES =====
 MPU6050 mpu;
-float pitch, roll;
+float pitch = 0, roll = 0;
+float gyroPitch = 0, gyroRoll = 0;
 float Kp = 2.0; // proportional gain
+unsigned long lastTime = 0;
 
 // ===== BUTTON STATE =====
 int rbtn, lbtn, fbtn, bbtn;
@@ -60,9 +62,16 @@ void setup() {
   m3.writeMicroseconds(1000);
   m4.writeMicroseconds(1000);
   delay(2000);
+
+  lastTime = micros();
 }
 
 void loop() {
+  // ===== TIME STEP =====
+  unsigned long now = micros();
+  float dt = (now - lastTime) / 1000000.0; // seconds
+  lastTime = now;
+
   // ===== READ BUTTONS =====
   rbtn = pulseIn(rsig, HIGH);
   lbtn = pulseIn(lsig, HIGH);
@@ -74,16 +83,25 @@ void loop() {
   fclk = fbtn > 1700;
   bclk = bbtn > 1700;
 
-  // ===== READ GYRO =====
+  // ===== READ ACCEL + GYRO =====
   int16_t ax, ay, az, gx, gy, gz;
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
-  // Basic tilt calculation
-  pitch = atan2(ax, sqrt(ay * ay + az * az)) * 180 / PI;
-  roll  = atan2(ay, sqrt(ax * ax + az * az)) * 180 / PI;
+  // Accelerometer tilt (degrees)
+  float accPitch = atan2(ax, sqrt(ay * ay + az * az)) * 180 / PI;
+  float accRoll  = atan2(ay, sqrt(ax * ax + az * az)) * 180 / PI;
 
-  int pitchCorrection = Kp * pitch;
-  int rollCorrection  = Kp * roll;
+  // Gyroscope rates (deg/sec) — default 131 LSB/(°/s)
+  float gyroRateX = gx / 131.0;
+  float gyroRateY = gy / 131.0;
+
+  // Integrate gyro
+  gyroPitch += gyroRateX * dt;
+  gyroRoll  += gyroRateY * dt;
+
+  // Complementary filter — merge gyro + accel
+  pitch = 0.98 * gyroPitch + 0.02 * accPitch;
+  roll  = 0.98 * gyroRoll  + 0.02 * accRoll;
 
   // ===== MANUAL BASE SPEED =====
   int base1 = mid, base2 = mid, base3 = mid, base4 = mid;
@@ -120,6 +138,9 @@ void loop() {
   }
 
   // ===== ADD GYRO CORRECTIONS =====
+  int pitchCorrection = Kp * pitch;
+  int rollCorrection  = Kp * roll;
+
   int sp1 = base1 - pitchCorrection + rollCorrection; // front-left
   int sp2 = base2 - pitchCorrection - rollCorrection; // front-right
   int sp3 = base3 + pitchCorrection + rollCorrection; // back-left
@@ -146,5 +167,5 @@ void loop() {
   Serial.print(sp3); Serial.print(", ");
   Serial.println(sp4);
 
-  delay(20);
+  delay(5);
 }
