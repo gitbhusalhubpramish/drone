@@ -1,6 +1,6 @@
 #include <Wire.h>
 #include <MPU6050.h>
-#include <Servo.h>
+#include <ServoTimer2.h>
 
 // ===== DRONE MOTOR LAYOUT =====
 // m1 - Front Left
@@ -13,7 +13,7 @@
 #define fsig 7
 #define bsig 8
 
-Servo m1, m2, m3, m4;
+ServoTimer2 m1, m2, m3, m4;
 const int dm1 = 9;
 const int dm2 = 10;
 const int dm3 = 11;
@@ -21,20 +21,47 @@ const int dm4 = 6;
 
 // ===== MPU VARIABLES =====
 MPU6050 mpu;
-float pitch = 0, roll = 0;         // Filtered angles
-float gyroPitch = 0, gyroRoll = 0; // Gyro integrated angles
-float Kp = 2.0;                    // Proportional gain for correction
+float pitch = 0, roll = 0;
+float gyroPitch = 0, gyroRoll = 0;
+float Kp = 2.0;
 unsigned long lastTime = 0;
 
-// ===== BUTTON STATES =====
-int rbtn, lbtn, fbtn, bbtn;
-bool rclk = false, lclk = false, fclk = false, bclk = false;
+// ===== RC INPUTS =====
+volatile uint16_t rcValue[4] = {1500, 1500, 1500, 1500};
+volatile uint32_t rcStart[4];
+const uint8_t rcPins[4] = {rsig, lsig, fsig, bsig};
 
 // ===== SPEEDS =====
 int hi = 2000, lo = 1000, mid = 1500;
 
+// ===== INTERRUPT HANDLER =====
+void rcISR0() {
+  if (digitalRead(rsig))
+    rcStart[0] = micros();
+  else
+    rcValue[0] = micros() - rcStart[0];
+}
+void rcISR1() {
+  if (digitalRead(lsig))
+    rcStart[1] = micros();
+  else
+    rcValue[1] = micros() - rcStart[1];
+}
+void rcISR2() {
+  if (digitalRead(fsig))
+    rcStart[2] = micros();
+  else
+    rcValue[2] = micros() - rcStart[2];
+}
+void rcISR3() {
+  if (digitalRead(bsig))
+    rcStart[3] = micros();
+  else
+    rcValue[3] = micros() - rcStart[3];
+}
+
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   Wire.begin();
 
   mpu.initialize();
@@ -49,17 +76,18 @@ void setup() {
   m3.attach(dm3);
   m4.attach(dm4);
 
-  pinMode(lsig, INPUT);
-  pinMode(rsig, INPUT);
-  pinMode(fsig, INPUT);
-  pinMode(bsig, INPUT);
-
   // Arm ESCs
-  m1.writeMicroseconds(1000);
-  m2.writeMicroseconds(1000);
-  m3.writeMicroseconds(1000);
-  m4.writeMicroseconds(1000);
+  m1.write(1000);
+  m2.write(1000);
+  m3.write(1000);
+  m4.write(1000);
   delay(2000);
+
+  // Attach interrupts for RC
+  attachInterrupt(digitalPinToInterrupt(rsig), rcISR0, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(lsig), rcISR1, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(fsig), rcISR2, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(bsig), rcISR3, CHANGE);
 
   lastTime = micros();
 }
@@ -70,34 +98,25 @@ void loop() {
   float dt = (now - lastTime) / 1000000.0;
   lastTime = now;
 
-  // ===== BUTTON READ =====
-  rbtn = pulseIn(rsig, HIGH);
-  lbtn = pulseIn(lsig, HIGH);
-  bbtn = pulseIn(bsig, HIGH);
-  fbtn = pulseIn(fsig, HIGH);
-
-  rclk = rbtn > 1700;
-  lclk = lbtn > 1700;
-  fclk = fbtn > 1700;
-  bclk = bbtn > 1700;
+  // ===== RC BUTTON STATES =====
+  bool rclk = rcValue[0] > 1700;
+  bool lclk = rcValue[1] > 1700;
+  bool fclk = rcValue[2] > 1700;
+  bool bclk = rcValue[3] > 1700;
 
   // ===== MPU READ =====
   int16_t ax, ay, az, gx, gy, gz;
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
-  // Accelerometer tilt (degrees)
   float accPitch = atan2(ax, sqrt(ay * ay + az * az)) * 180 / PI;
   float accRoll  = atan2(ay, sqrt(ax * ax + az * az)) * 180 / PI;
 
-  // Gyroscope rates (deg/sec) — 131 LSB/(°/s)
-  float gyroRateX = gx / 131.0; // Roll rate
-  float gyroRateY = gy / 131.0; // Pitch rate
+  float gyroRateX = gx / 131.0;
+  float gyroRateY = gy / 131.0;
 
-  // Integrate gyro (maintain sign convention from first code)
   gyroPitch += gyroRateY * dt;
   gyroRoll  -= gyroRateX * dt;
 
-  // Complementary filter — merge gyro + accel
   pitch = 0.98 * gyroPitch + 0.02 * accPitch;
   roll  = 0.98 * gyroRoll  + 0.02 * accRoll;
 
@@ -105,32 +124,25 @@ void loop() {
   int base1 = mid, base2 = mid, base3 = mid, base4 = mid;
 
   if (rclk && lclk) {
-    base1 = base2 = base3 = base4 = lo; // down
-  } 
-  else if (fclk && bclk) {
-    base1 = base2 = base3 = base4 = hi; // up
-  } 
-  else if (fclk && rclk) { // rotate CW
+    base1 = base2 = base3 = base4 = lo;
+  } else if (fclk && bclk) {
+    base1 = base2 = base3 = base4 = hi;
+  } else if (fclk && rclk) {
     base1 = base3 = mid;
     base2 = base4 = lo;
-  } 
-  else if (bclk && lclk) { // rotate CCW
+  } else if (bclk && lclk) {
     base1 = base3 = lo;
     base2 = base4 = mid;
-  } 
-  else if (rclk) { // rightward
+  } else if (rclk) {
     base2 = base4 = lo;
     base1 = base3 = mid;
-  } 
-  else if (lclk) { // leftward
+  } else if (lclk) {
     base1 = base3 = lo;
     base2 = base4 = mid;
-  } 
-  else if (fclk) { // forward
+  } else if (fclk) {
     base1 = base2 = lo;
     base3 = base4 = mid;
-  } 
-  else if (bclk) { // backward
+  } else if (bclk) {
     base1 = base2 = mid;
     base3 = base4 = lo;
   }
@@ -139,24 +151,22 @@ void loop() {
   int pitchCorrection = Kp * pitch;
   int rollCorrection  = Kp * roll;
 
-  int sp1 = base1 - pitchCorrection + rollCorrection; // Front-left
-  int sp2 = base2 - pitchCorrection - rollCorrection; // Front-right
-  int sp3 = base3 + pitchCorrection + rollCorrection; // Back-left
-  int sp4 = base4 + pitchCorrection - rollCorrection; // Back-right
+  int sp1 = constrain(base1 - pitchCorrection + rollCorrection, 1000, 2000);
+  int sp2 = constrain(base2 - pitchCorrection - rollCorrection, 1000, 2000);
+  int sp3 = constrain(base3 + pitchCorrection + rollCorrection, 1000, 2000);
+  int sp4 = constrain(base4 + pitchCorrection - rollCorrection, 1000, 2000);
 
-  // Limit range
-  sp1 = constrain(sp1, 1000, 2000);
-  sp2 = constrain(sp2, 1000, 2000);
-  sp3 = constrain(sp3, 1000, 2000);
-  sp4 = constrain(sp4, 1000, 2000);
+  // ===== SEND TO MOTORS (50Hz) =====
+  static unsigned long lastMotorUpdate = 0;
+  if (now - lastMotorUpdate >= 20000) { // every 20 ms
+    lastMotorUpdate = now;
+    m1.write(sp1);
+    m2.write(sp2);
+    m3.write(sp3);
+    m4.write(sp4);
+  }
 
-  // Send to motors
-  m1.writeMicroseconds(sp1);
-  m2.writeMicroseconds(sp2);
-  m3.writeMicroseconds(sp3);
-  m4.writeMicroseconds(sp4);
-
-  // Debug output
+  // ===== DEBUG =====
   Serial.print("Pitch: "); Serial.print(pitch);
   Serial.print(" | Roll: "); Serial.print(roll);
   Serial.print(" | Motors: ");
@@ -164,6 +174,4 @@ void loop() {
   Serial.print(sp2); Serial.print(", ");
   Serial.print(sp3); Serial.print(", ");
   Serial.println(sp4);
-
-  delay(5); // Faster loop for better stability
 }
