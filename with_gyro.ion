@@ -66,10 +66,8 @@ void setup() {
 
   mpu.initialize();
   if (!mpu.testConnection()) {
-    Serial.println("MPU6050 connection failed!");
     while (1);
   }
-  Serial.println("MPU6050 ready.");
 
   m1.attach(dm1);
   m2.attach(dm2);
@@ -191,12 +189,4 @@ void loop() {
     m4.write(sp4);
   }
 
-  // ===== DEBUG =====
-  Serial.print("Pitch: "); Serial.print(pitch);
-  Serial.print(" | Roll: "); Serial.print(roll);
-  Serial.print(" | Motors: ");
-  Serial.print(sp1); Serial.print(", ");
-  Serial.print(sp2); Serial.print(", ");
-  Serial.print(sp3); Serial.print(", ");
-  Serial.println(sp4);
 }
