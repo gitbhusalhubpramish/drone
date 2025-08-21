@@ -1,19 +1,19 @@
 #include <Wire.h>
 #include <MPU6050.h>
-#include <ServoTimer2.h>
+#include <Servo.h>
 
 // ===== DRONE MOTOR LAYOUT =====
-// m1 - Front Left
-// m2 - Front Right
-// m3 - Back Left
-// m4 - Back Right
+// m1 - Front Left (CW)
+// m2 - Front Right (CCW)
+// m3 - Back Left (CCW)
+// m4 - Back Right (CW)
 
 #define lsig 2
 #define rsig 4
 #define fsig 7
 #define bsig 8
 
-ServoTimer2 m1, m2, m3, m4;
+Servo m1, m2, m3, m4;
 const int dm1 = 9;
 const int dm2 = 10;
 const int dm3 = 11;
@@ -120,41 +120,66 @@ void loop() {
   pitch = 0.98 * gyroPitch + 0.02 * accPitch;
   roll  = 0.98 * gyroRoll  + 0.02 * accRoll;
 
-  // ===== BASE SPEEDS =====
-  int base1 = mid, base2 = mid, base3 = mid, base4 = mid;
+  // ===== MOVEMENT PARAMETERS =====
+  // You can tune these for more/less aggressive flight
+  float desiredAngle = 15.0;    // degrees for full stick tilt
+  int yawAmount = 150;          // motor delta for yaw
+  int thrustAmount = 200;       // for up/down
 
-  if (rclk && lclk) {
-    base1 = base2 = base3 = base4 = lo;
-  } else if (fclk && bclk) {
-    base1 = base2 = base3 = base4 = hi;
-  } else if (fclk && rclk) {
-    base1 = base3 = mid;
-    base2 = base4 = lo;
-  } else if (bclk && lclk) {
-    base1 = base3 = lo;
-    base2 = base4 = mid;
-  } else if (rclk) {
-    base2 = base4 = lo;
-    base1 = base3 = mid;
-  } else if (lclk) {
-    base1 = base3 = lo;
-    base2 = base4 = mid;
-  } else if (fclk) {
-    base1 = base2 = lo;
-    base3 = base4 = mid;
-  } else if (bclk) {
-    base1 = base2 = mid;
-    base3 = base4 = lo;
+  // ===== TARGET ANGLES =====
+  float targetPitch = 0;
+  float targetRoll = 0;
+  int thrust = 0;
+  int yaw = 0;
+
+  // l + r => down
+  // f + b => up
+  // f + r => yaw CW
+  // b + l => yaw CCW
+  // f only => forward
+  // b only => backward
+  // r only => right
+  // l only => left
+
+  if (lclk && rclk && !fclk && !bclk) {
+    thrust = -thrustAmount;
+  } else if (fclk && bclk && !lclk && !rclk) {
+    thrust = thrustAmount;
+  } else if (fclk && rclk && !bclk && !lclk) {
+    yaw = yawAmount; // yaw CW
+  } else if (bclk && lclk && !fclk && !rclk) {
+    yaw = -yawAmount; // yaw CCW
+  } else if (fclk && !bclk && !lclk && !rclk) {
+    targetPitch = -desiredAngle; // forward
+  } else if (bclk && !fclk && !lclk && !rclk) {
+    targetPitch = desiredAngle; // backward
+  } else if (rclk && !lclk && !fclk && !bclk) {
+    targetRoll = desiredAngle; // right
+  } else if (lclk && !rclk && !fclk && !bclk) {
+    targetRoll = -desiredAngle; // left
   }
+  // else: hover
 
-  // ===== CORRECTIONS =====
-  int pitchCorrection = Kp * pitch;
-  int rollCorrection  = Kp * roll;
+  // ===== BASE SPEEDS =====
+  int base1 = mid + thrust;
+  int base2 = mid + thrust;
+  int base3 = mid + thrust;
+  int base4 = mid + thrust;
 
-  int sp1 = constrain(base1 - pitchCorrection + rollCorrection, 1000, 2000);
-  int sp2 = constrain(base2 - pitchCorrection - rollCorrection, 1000, 2000);
-  int sp3 = constrain(base3 + pitchCorrection + rollCorrection, 1000, 2000);
-  int sp4 = constrain(base4 + pitchCorrection - rollCorrection, 1000, 2000);
+  // Yaw mixing (CW: m1, m4; CCW: m2, m3)
+  base1 += yaw;
+  base4 += yaw;
+  base2 -= yaw;
+  base3 -= yaw;
+
+  // ===== CORRECTIONS (move to target angles) =====
+  int pitchCorrection = Kp * (pitch - targetPitch);
+  int rollCorrection  = Kp * (roll - targetRoll);
+
+  int sp1 = constrain(base1 - pitchCorrection + rollCorrection, 1000, 2000); // FL
+  int sp2 = constrain(base2 - pitchCorrection - rollCorrection, 1000, 2000); // FR
+  int sp3 = constrain(base3 + pitchCorrection + rollCorrection, 1000, 2000); // BL
+  int sp4 = constrain(base4 + pitchCorrection - rollCorrection, 1000, 2000); // BR
 
   // ===== SEND TO MOTORS (50Hz) =====
   static unsigned long lastMotorUpdate = 0;
