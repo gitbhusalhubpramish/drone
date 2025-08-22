@@ -26,6 +26,18 @@ float gyroPitch = 0, gyroRoll = 0;
 float Kp = 2.0;
 unsigned long lastTime = 0;
 
+// ===== ACCEL Z-SMOOTHING =====
+float accZ = 0;
+float accZ_filt = 0;
+float accZ_offset = 0; // for calibration
+float accZ_gain = 1.0; // can be tuned if needed
+
+// ===== ALTITUDE CONTROL =====
+float targetAccZ = 0;  // target vertical acceleration (hover at 0)
+float accKp = 100.0;   // P gain for vertical accel
+float accKi = 10.0;    // I gain for vertical accel
+float accZ_integral = 0;
+
 // ===== RC INPUTS =====
 volatile uint16_t rcValue[4] = {1500, 1500, 1500, 1500};
 volatile uint32_t rcStart[4];
@@ -60,6 +72,10 @@ void rcISR3() {
     rcValue[3] = micros() - rcStart[3];
 }
 
+// ===== THRUST SMOOTHING =====
+int currentThrust = 0;
+int thrustStep = 2; // how fast thrust can change per loop (for smoothness)
+
 void setup() {
   Serial.begin(115200);
   Wire.begin();
@@ -88,6 +104,18 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(bsig), rcISR3, CHANGE);
 
   lastTime = micros();
+
+  // ===== ACCEL Z CALIBRATION =====
+  // Average Z accel for ~2 seconds (while flat on desk!)
+  float azsum = 0;
+  int n = 400;
+  for (int i = 0; i < n; i++) {
+    int16_t ax, ay, az, gx, gy, gz;
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+    azsum += (float)az;
+    delay(5);
+  }
+  accZ_offset = azsum / n;
 }
 
 void loop() {
@@ -118,16 +146,21 @@ void loop() {
   pitch = 0.98 * gyroPitch + 0.02 * accPitch;
   roll  = 0.98 * gyroRoll  + 0.02 * accRoll;
 
+  // ===== ACCEL Z CONTROL =====
+  accZ = ((float)az - accZ_offset) * accZ_gain;
+  // Simple low-pass filter
+  accZ_filt = 0.9 * accZ_filt + 0.1 * accZ;
+
   // ===== MOVEMENT PARAMETERS =====
-  // You can tune these for more/less aggressive flight
   float desiredAngle = 15.0;    // degrees for full stick tilt
   int yawAmount = 150;          // motor delta for yaw
-  int thrustAmount = 200;       // for up/down
+  int maxThrustUp = 300;        // max up
+  int maxThrustDn = -300;       // max down
 
   // ===== TARGET ANGLES =====
   float targetPitch = 0;
   float targetRoll = 0;
-  int thrust = 0;
+  int targetThrust = 0;
   int yaw = 0;
 
   // l + r => down
@@ -140,9 +173,9 @@ void loop() {
   // l only => left
 
   if (lclk && rclk && !fclk && !bclk) {
-    thrust = -thrustAmount;
+    targetThrust = maxThrustDn;
   } else if (fclk && bclk && !lclk && !rclk) {
-    thrust = thrustAmount;
+    targetThrust = maxThrustUp;
   } else if (fclk && rclk && !bclk && !lclk) {
     yaw = yawAmount; // yaw CW
   } else if (bclk && lclk && !fclk && !rclk) {
@@ -157,6 +190,26 @@ void loop() {
     targetRoll = -desiredAngle; // left
   }
   // else: hover
+
+  // ===== THRUST RAMPING (smooth transitions) =====
+  if (currentThrust < targetThrust) currentThrust += thrustStep;
+  else if (currentThrust > targetThrust) currentThrust -= thrustStep;
+
+  // ===== VERTICAL ACCEL PID (for up/down stability) =====
+  // Only active if user commands up/down
+  float accZ_error = 0;
+  float accZ_out = 0;
+  if (targetThrust != 0) {
+    // Setpoint is up/down, measured is accZ_filt (~0 at hover)
+    accZ_error = (targetThrust > 0 ? 1.0 : -1.0) - accZ_filt / 16384.0; // 1g = 16384 LSB for MPU6050
+    accZ_integral += accZ_error * dt;
+    accZ_out = accKp * accZ_error + accKi * accZ_integral;
+    accZ_out = constrain(accZ_out, maxThrustDn, maxThrustUp);
+  } else {
+    accZ_integral = 0; // reset I term if not climbing/descending
+  }
+
+  int thrust = currentThrust + (int)accZ_out;
 
   // ===== BASE SPEEDS =====
   int base1 = mid + thrust;
@@ -188,5 +241,13 @@ void loop() {
     m3.write(sp3);
     m4.write(sp4);
   }
+
+  // Optional: print debug info
+  // Serial.print("accZ: "); Serial.print(accZ_filt);
+  // Serial.print("  thrust: "); Serial.print(thrust);
+  // Serial.print("  pitch: "); Serial.print(pitch);
+  // Serial.print("  roll: "); Serial.print(roll);
+  // Serial.print("  sp1: "); Serial.print(sp1);
+  // Serial.println();
 
 }
