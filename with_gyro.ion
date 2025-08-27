@@ -3,10 +3,10 @@
 #include <Servo.h>
 
 // ===== DRONE MOTOR LAYOUT =====
-// m1 - Front Left (CW)
+// m1 - Front Left  (CW)
 // m2 - Front Right (CCW)
-// m3 - Back Left (CCW)
-// m4 - Back Right (CW)
+// m3 - Back Left   (CCW)
+// m4 - Back Right  (CW)
 
 #define lsig 2
 #define rsig 4
@@ -21,22 +21,16 @@ const int dm4 = 6;
 
 // ===== MPU VARIABLES =====
 MPU6050 mpu;
-float pitch = 0, roll = 0;
-float gyroPitch = 0, gyroRoll = 0;
-float Kp = 2.0;
+float pitch = 0, roll = 0, yawRate = 0;
 unsigned long lastTime = 0;
 
-// ===== ACCEL Z-SMOOTHING =====
-float accZ = 0;
-float accZ_filt = 0;
-float accZ_offset = 0; // for calibration
-float accZ_gain = 1.0; // can be tuned if needed
+// ===== PID VARIABLES =====
+float pitchError, rollError, yawError;
+float iPitch = 0, iRoll = 0, iYaw = 0;
+float lastPitchError = 0, lastRollError = 0, lastYawError = 0;
 
-// ===== ALTITUDE CONTROL =====
-float targetAccZ = 0;  // target vertical acceleration (hover at 0)
-float accKp = 100.0;   // P gain for vertical accel
-float accKi = 10.0;    // I gain for vertical accel
-float accZ_integral = 0;
+float Kp = 3.0, Ki = 0.01, Kd = 20.0;     // Pitch/Roll gains
+float Kp_yaw = 4.0, Ki_yaw = 0.02, Kd_yaw = 10.0; // Yaw gains
 
 // ===== RC INPUTS =====
 volatile uint16_t rcValue[4] = {1500, 1500, 1500, 1500};
@@ -48,33 +42,21 @@ int hi = 2000, lo = 1000, mid = 1500;
 
 // ===== INTERRUPT HANDLER =====
 void rcISR0() {
-  if (digitalRead(rsig))
-    rcStart[0] = micros();
-  else
-    rcValue[0] = micros() - rcStart[0];
+  if (digitalRead(rsig)) rcStart[0] = micros();
+  else rcValue[0] = micros() - rcStart[0];
 }
 void rcISR1() {
-  if (digitalRead(lsig))
-    rcStart[1] = micros();
-  else
-    rcValue[1] = micros() - rcStart[1];
+  if (digitalRead(lsig)) rcStart[1] = micros();
+  else rcValue[1] = micros() - rcStart[1];
 }
 void rcISR2() {
-  if (digitalRead(fsig))
-    rcStart[2] = micros();
-  else
-    rcValue[2] = micros() - rcStart[2];
+  if (digitalRead(fsig)) rcStart[2] = micros();
+  else rcValue[2] = micros() - rcStart[2];
 }
 void rcISR3() {
-  if (digitalRead(bsig))
-    rcStart[3] = micros();
-  else
-    rcValue[3] = micros() - rcStart[3];
+  if (digitalRead(bsig)) rcStart[3] = micros();
+  else rcValue[3] = micros() - rcStart[3];
 }
-
-// ===== THRUST SMOOTHING =====
-int currentThrust = 0;
-int thrustStep = 2; // how fast thrust can change per loop (for smoothness)
 
 void setup() {
   Serial.begin(115200);
@@ -104,39 +86,16 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(bsig), rcISR3, CHANGE);
 
   lastTime = micros();
-
-  // ===== ACCEL Z CALIBRATION =====
-  // Average Z accel for ~2 seconds (while flat on desk!)
-  float azsum = 0;
-  int n = 400;
-  for (int i = 0; i < n; i++) {
-    int16_t ax, ay, az, gx, gy, gz;
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-    azsum += (float)az;
-    delay(5);
-  }
-  accZ_offset = azsum / n;
-//   for(int i = 0; i<5; i++){
-//     m1.writeMicroseconds(2000);
-//   m2.writeMicroseconds(2000);
-//   m3.writeMicroseconds(2000);
-//   m4.writeMicroseconds(2000);
-//   }
 }
 
 void loop() {
-  // ===== TIME STEP =====
+  // ===== TIMING =====
   unsigned long now = micros();
+  if (now - lastTime < 4000) return;  // run at ~250 Hz
   float dt = (now - lastTime) / 1000000.0;
   lastTime = now;
 
-  // ===== RC BUTTON STATES =====
-  bool rclk = rcValue[0] > 1700;
-  bool lclk = rcValue[1] > 1700;
-  bool fclk = rcValue[2] > 1700;
-  bool bclk = rcValue[3] > 1700;
-
-  // ===== MPU READ =====
+  // ===== READ MPU =====
   int16_t ax, ay, az, gx, gy, gz;
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
@@ -145,115 +104,61 @@ void loop() {
 
   float gyroRateX = gx / 131.0;
   float gyroRateY = gy / 131.0;
+  yawRate = gz / 131.0;
 
+  static float gyroPitch = 0, gyroRoll = 0;
   gyroPitch += gyroRateY * dt;
   gyroRoll  -= gyroRateX * dt;
 
   pitch = 0.98 * gyroPitch + 0.02 * accPitch;
   roll  = 0.98 * gyroRoll  + 0.02 * accRoll;
 
-  // ===== ACCEL Z CONTROL =====
-  accZ = ((float)az - accZ_offset) * accZ_gain;
-  // Simple low-pass filter
-  accZ_filt = 0.9 * accZ_filt + 0.1 * accZ;
+  // ===== RC TARGETS =====
+  float targetPitch = (rcValue[2] - 1500) / 500.0 * 15;   // forward/back
+  float targetRoll  = (rcValue[0] - 1500) / 500.0 * 15;   // left/right
+  float targetYawRate = (rcValue[1] - 1500) / 500.0 * 100; // deg/s
+  int thrust = map(rcValue[3], 1000, 2000, 1000, 2000);   // throttle
 
-  // ===== MOVEMENT PARAMETERS =====
-  float desiredAngle = 15.0;    // degrees for full stick tilt
-  int yawAmount = 150;          // motor delta for yaw
-  int maxThrustUp = 300;        // max up
-  int maxThrustDn = -300;       // max down
+  // ===== PID CONTROL =====
+  // Pitch
+  pitchError = targetPitch - pitch;
+  iPitch += pitchError * dt;
+  float dPitch = (pitchError - lastPitchError) / dt;
+  float pitchCorrection = Kp * pitchError + Ki * iPitch + Kd * dPitch;
+  lastPitchError = pitchError;
 
-  // ===== TARGET ANGLES =====
-  float targetPitch = 0;
-  float targetRoll = 0;
-  int targetThrust = 0;
-  int yaw = 0;
+  // Roll
+  rollError = targetRoll - roll;
+  iRoll += rollError * dt;
+  float dRoll = (rollError - lastRollError) / dt;
+  float rollCorrection = Kp * rollError + Ki * iRoll + Kd * dRoll;
+  lastRollError = rollError;
 
-  // l + r => down
-  // f + b => up
-  // f + r => yaw CW
-  // b + l => yaw CCW
-  // f only => forward
-  // b only => backward
-  // r only => right
-  // l only => left
+  // Yaw
+  yawError = targetYawRate - yawRate;
+  iYaw += yawError * dt;
+  float dYaw = (yawError - lastYawError) / dt;
+  float yawCorrection = Kp_yaw * yawError + Ki_yaw * iYaw + Kd_yaw * dYaw;
+  lastYawError = yawError;
 
-  if (lclk && rclk && !fclk && !bclk) {
-    targetThrust = maxThrustDn;
-  } else if (fclk && bclk && !lclk && !rclk) {
-    targetThrust = maxThrustUp;
-  } else if (fclk && rclk && !bclk && !lclk) {
-    yaw = yawAmount; // yaw CW
-  } else if (bclk && lclk && !fclk && !rclk) {
-    yaw = -yawAmount; // yaw CCW
-  } else if (fclk && !bclk && !lclk && !rclk) {
-    targetPitch = -desiredAngle; // forward
-  } else if (bclk && !fclk && !lclk && !rclk) {
-    targetPitch = desiredAngle; // backward
-  } else if (rclk && !lclk && !fclk && !bclk) {
-    targetRoll = desiredAngle; // right
-  } else if (lclk && !rclk && !fclk && !bclk) {
-    targetRoll = -desiredAngle; // left
-  }
-  // else: hover
+  // ===== MOTOR MIXING =====
+  int sp1 = constrain(thrust - pitchCorrection + rollCorrection - yawCorrection, 1000, 2000); // FL (CW)
+  int sp2 = constrain(thrust - pitchCorrection - rollCorrection + yawCorrection, 1000, 2000); // FR (CCW)
+  int sp3 = constrain(thrust + pitchCorrection + rollCorrection + yawCorrection, 1000, 2000); // BL (CCW)
+  int sp4 = constrain(thrust + pitchCorrection - rollCorrection - yawCorrection, 1000, 2000); // BR (CW)
 
-  // ===== THRUST RAMPING (smooth transitions) =====
-  if (currentThrust < targetThrust) currentThrust += thrustStep;
-  else if (currentThrust > targetThrust) currentThrust -= thrustStep;
+  // ===== SEND TO MOTORS =====
+  m1.writeMicroseconds(sp1);
+  m2.writeMicroseconds(sp2);
+  m3.writeMicroseconds(sp3);
+  m4.writeMicroseconds(sp4);
 
-  // ===== VERTICAL ACCEL PID (for up/down stability) =====
-  // Only active if user commands up/down
-  float accZ_error = 0;
-  float accZ_out = 0;
-  if (targetThrust != 0) {
-    // Setpoint is up/down, measured is accZ_filt (~0 at hover)
-    accZ_error = (targetThrust > 0 ? 1.0 : -1.0) - accZ_filt / 16384.0; // 1g = 16384 LSB for MPU6050
-    accZ_integral += accZ_error * dt;
-    accZ_out = accKp * accZ_error + accKi * accZ_integral;
-    accZ_out = constrain(accZ_out, maxThrustDn, maxThrustUp);
-  } else {
-    accZ_integral = 0; // reset I term if not climbing/descending
-  }
-
-  int thrust = currentThrust + (int)accZ_out;
-
-  // ===== BASE SPEEDS =====
-  int base1 = mid + thrust;
-  int base2 = mid + thrust;
-  int base3 = mid + thrust;
-  int base4 = mid + thrust;
-
-  // Yaw mixing (CW: m1, m4; CCW: m2, m3)
-  base1 += yaw;
-  base4 += yaw;
-  base2 -= yaw;
-  base3 -= yaw;
-
-  // ===== CORRECTIONS (move to target angles) =====
-  int pitchCorrection = Kp * (pitch - targetPitch);
-  int rollCorrection  = Kp * (roll - targetRoll);
-
-  int sp1 = constrain(base1 - pitchCorrection + rollCorrection, 1000, 2000); // FL
-  int sp2 = constrain(base2 - pitchCorrection - rollCorrection, 1000, 2000); // FR
-  int sp3 = constrain(base3 + pitchCorrection + rollCorrection, 1000, 2000); // BL
-  int sp4 = constrain(base4 + pitchCorrection - rollCorrection, 1000, 2000); // BR
-
-  // ===== SEND TO MOTORS (50Hz) =====
-  static unsigned long lastMotorUpdate = 0;
-  if (now - lastMotorUpdate >= 20000) { // every 20 ms
-    lastMotorUpdate = now;
-    m1.writeMicroseconds(sp1);
-    m2.writeMicroseconds(sp2);
-    m3.writeMicroseconds(sp3);
-    m4.writeMicroseconds(sp4);
-  }
-
-  // Optional: print debug info
-  // Serial.print("accZ: "); Serial.print(accZ_filt);
-  // Serial.print("  thrust: "); Serial.print(thrust);
-  // Serial.print("  pitch: "); Serial.print(pitch);
-  // Serial.print("  roll: "); Serial.print(roll);
-  // Serial.print("  sp1: "); Serial.print(sp1);
-  // Serial.println();
-
+  // Debug
+  // Serial.print("Pitch: "); Serial.print(pitch);
+  // Serial.print(" Roll: "); Serial.print(roll);
+  // Serial.print(" Thrust: "); Serial.print(thrust);
+  // Serial.print(" sp1: "); Serial.print(sp1);
+  // Serial.print(" sp2: "); Serial.print(sp2);
+  // Serial.print(" sp3: "); Serial.print(sp3);
+  // Serial.print(" sp4: "); Serial.println(sp4);
 }
