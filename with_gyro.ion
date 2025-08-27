@@ -1,169 +1,257 @@
 #include <Wire.h>
 #include <MPU6050.h>
 #include <Servo.h>
+#include <PinChangeInterrupt.h>  // Install from Library Manager
 
-// ===== DRONE MOTOR LAYOUT =====
-// m1 - Front Left
-// m2 - Front Right
-// m3 - Back Left
-// m4 - Back Right
+// ================== MOTOR LAYOUT (X) ==================
+// m1 - Front Left  (CW)   -> D9
+// m2 - Front Right (CCW)  -> D10
+// m3 - Back  Left  (CCW)  -> D11
+// m4 - Back  Right (CW)   -> D6
 
-#define lsig 2
-#define rsig 4
-#define fsig 7
-#define bsig 8
+// ================== RC INPUT PINS =====================
+#define RSIG 2   // Roll   (external interrupt)
+#define LSIG 3   // Pitch  (external interrupt)
+#define FSIG 4   // Throttle (pin-change interrupt)
+#define BSIG 8   // Yaw / Aux (pin-change interrupt)
+
+// ================== ESC OUTPUT PINS ===================
+const uint8_t PIN_M1 = 9;
+const uint8_t PIN_M2 = 10;
+const uint8_t PIN_M3 = 11;
+const uint8_t PIN_M4 = 6;
 
 Servo m1, m2, m3, m4;
-const int dm1 = 9;
-const int dm2 = 10;
-const int dm3 = 11;
-const int dm4 = 6;
 
-// ===== MPU VARIABLES =====
+// ================== MPU6050 ===========================
 MPU6050 mpu;
-float pitch = 0, roll = 0;         // Filtered angles
-float gyroPitch = 0, gyroRoll = 0; // Gyro integrated angles
-float Kp = 2.0;                    // Proportional gain for correction
-unsigned long lastTime = 0;
+float roll=0, pitch=0;
+float gyroRoll=0, gyroPitch=0;
+float gOffX=0, gOffY=0, gOffZ=0;  // gyro offsets (dps)
 
-// ===== BUTTON STATES =====
-int rbtn, lbtn, fbtn, bbtn;
-bool rclk = false, lclk = false, fclk = false, bclk = false;
+// ================== RC CAPTURE ========================
+volatile uint16_t rcValue[4] = {1500,1500,1000,1500}; // roll, pitch, throttle, yaw
+volatile uint32_t rcStart[4] = {0,0,0,0};
+const uint8_t rcPins[4] = {RSIG, LSIG, FSIG, BSIG};
 
-// ===== SPEEDS =====
-int hi = 2000, lo = 1000, mid = 1500;
+// ================== LOOP TIMING =======================
+const float LOOP_HZ = 250.0;           // 250 Hz
+const uint32_t LOOP_US = 1000000.0/LOOP_HZ;
+uint32_t lastLoop = 0;
 
-void setup() {
-  Serial.begin(9600);
-  Wire.begin();
+// ================== PID GAINS (start here) ============
+float Kp = 3.0;
+float Ki = 0.00;
+float Kd = 25.0;
 
-  mpu.initialize();
-  if (!mpu.testConnection()) {
-    Serial.println("MPU6050 connection failed!");
-    while (1);
-  }
-  Serial.println("MPU6050 ready.");
+// PID integrators/derivatives
+float iRoll=0, iPitch=0;
+float prevRollErr=0, prevPitchErr=0;
 
-  m1.attach(dm1);
-  m2.attach(dm2);
-  m3.attach(dm3);
-  m4.attach(dm4);
+// ================== SAFETY / LIMITS ===================
+const int MIN_US = 1000;
+const int MAX_US = 2000;
+const int BASE_US = 1000;      // ESC min
+const int MID_US  = 1500;
 
-  pinMode(lsig, INPUT);
-  pinMode(rsig, INPUT);
-  pinMode(fsig, INPUT);
-  pinMode(bsig, INPUT);
+// Stick to target angle mapping
+const float MAX_ANGLE_DEG = 20.0; // stick full deflection -> ±20°
 
-  // Arm ESCs
-  m1.writeMicroseconds(1000);
-  m2.writeMicroseconds(1000);
-  m3.writeMicroseconds(1000);
-  m4.writeMicroseconds(1000);
-  delay(2000);
+// Complementary filter factor
+const float ALPHA = 0.98;
 
-  lastTime = micros();
+// ================== RC ISRs ===========================
+// Index: 0=roll(RSIG), 1=pitch(LSIG), 2=throttle(FSIG), 3=yaw(BSIG)
+void rcISR_ext0() { // RSIG on D2
+  if (digitalRead(RSIG)) rcStart[0] = micros();
+  else rcValue[0] = (uint16_t)(micros() - rcStart[0]);
+}
+void rcISR_ext1() { // LSIG on D3
+  if (digitalRead(LSIG)) rcStart[1] = micros();
+  else rcValue[1] = (uint16_t)(micros() - rcStart[1]);
 }
 
-void loop() {
-  // ===== TIME STEP =====
-  unsigned long now = micros();
-  float dt = (now - lastTime) / 1000000.0;
-  lastTime = now;
+// Pin-change helper (for FSIG=D4 index2, BSIG=D8 index3)
+void rcISR_pcint_FSIG() {
+  if (digitalRead(FSIG)) rcStart[2] = micros();
+  else rcValue[2] = (uint16_t)(micros() - rcStart[2]);
+}
+void rcISR_pcint_BSIG() {
+  if (digitalRead(BSIG)) rcStart[3] = micros();
+  else rcValue[3] = (uint16_t)(micros() - rcStart[3]);
+}
 
-  // ===== BUTTON READ =====
-  rbtn = pulseIn(rsig, HIGH);
-  lbtn = pulseIn(lsig, HIGH);
-  bbtn = pulseIn(bsig, HIGH);
-  fbtn = pulseIn(fsig, HIGH);
+// ================== UTILS =============================
+static inline float constrainf(float x, float a, float b){
+  return (x<a)?a:((x>b)?b:x);
+}
+static inline int constraini(int x, int a, int b){
+  return (x<a)?a:((x>b)?b:x);
+}
+float mapStickToAngle(uint16_t us){
+  // Map 1000..2000 → -MAX_ANGLE .. +MAX_ANGLE (1500 = 0)
+  float v = (float)us;
+  v = (v - 1500.0f) / 500.0f;         // -1 .. +1
+  v = constrainf(v, -1.0f, 1.0f);
+  return v * MAX_ANGLE_DEG;
+}
+float dpsFromRaw(int16_t raw){ return ((float)raw)/131.0f; }   // 131 LSB/(°/s)
+float gFromRaw(int16_t raw){ return ((float)raw)/16384.0f; }   // 16384 LSB/g
 
-  rclk = rbtn > 1700;
-  lclk = lbtn > 1700;
-  fclk = fbtn > 1700;
-  bclk = bbtn > 1700;
+// ================== SETUP =============================
+void setup(){
+  Serial.begin(115200);
+  Wire.begin();
 
-  // ===== MPU READ =====
-  int16_t ax, ay, az, gx, gy, gz;
-  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  // RC inputs
+  pinMode(RSIG, INPUT);
+  pinMode(LSIG, INPUT);
+  pinMode(FSIG, INPUT);
+  pinMode(BSIG, INPUT);
 
-  // Accelerometer tilt (degrees)
-  float accPitch = atan2(ax, sqrt(ay * ay + az * az)) * 180 / PI;
-  float accRoll  = atan2(ay, sqrt(ax * ax + az * az)) * 180 / PI;
+  attachInterrupt(digitalPinToInterrupt(RSIG), rcISR_ext0, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(LSIG), rcISR_ext1, CHANGE);
+  attachPinChangeInterrupt(FSIG, rcISR_pcint_FSIG, CHANGE); // PinChangeInterrupt lib
+  attachPinChangeInterrupt(BSIG, rcISR_pcint_BSIG, CHANGE);
 
-  // Gyroscope rates (deg/sec) — 131 LSB/(°/s)
-  float gyroRateX = gx / 131.0; // Roll rate
-  float gyroRateY = gy / 131.0; // Pitch rate
+  // ESC outputs
+  m1.attach(PIN_M1); m2.attach(PIN_M2); m3.attach(PIN_M3); m4.attach(PIN_M4);
 
-  // Integrate gyro (maintain sign convention from first code)
-  gyroPitch += gyroRateY * dt;
-  gyroRoll  -= gyroRateX * dt;
+  // Arm ESCs at min
+  m1.writeMicroseconds(MIN_US);
+  m2.writeMicroseconds(MIN_US);
+  m3.writeMicroseconds(MIN_US);
+  m4.writeMicroseconds(MIN_US);
+  delay(3000);
 
-  // Complementary filter — merge gyro + accel
-  pitch = 0.98 * gyroPitch + 0.02 * accPitch;
-  roll  = 0.98 * gyroRoll  + 0.02 * accRoll;
-
-  // ===== BASE SPEEDS =====
-  int base1 = mid, base2 = mid, base3 = mid, base4 = mid;
-
-  if (rclk && lclk) {
-    base1 = base2 = base3 = base4 = lo; // down
-  } 
-  else if (fclk && bclk) {
-    base1 = base2 = base3 = base4 = hi; // up
-  } 
-  else if (fclk && rclk) { // rotate CW
-    base1 = base3 = mid;
-    base2 = base4 = lo;
-  } 
-  else if (bclk && lclk) { // rotate CCW
-    base1 = base3 = lo;
-    base2 = base4 = mid;
-  } 
-  else if (rclk) { // rightward
-    base2 = base4 = lo;
-    base1 = base3 = mid;
-  } 
-  else if (lclk) { // leftward
-    base1 = base3 = lo;
-    base2 = base4 = mid;
-  } 
-  else if (fclk) { // forward
-    base1 = base2 = lo;
-    base3 = base4 = mid;
-  } 
-  else if (bclk) { // backward
-    base1 = base2 = mid;
-    base3 = base4 = lo;
+  // MPU init
+  mpu.initialize();
+  if(!mpu.testConnection()){
+    while(1){ Serial.println("MPU6050 not found!"); delay(500); }
   }
 
-  // ===== CORRECTIONS =====
-  int pitchCorrection = Kp * pitch;
-  int rollCorrection  = Kp * roll;
+  // Gyro offset calibration (keep quad perfectly still)
+  const int CAL_N = 1000;
+  long gxSum=0, gySum=0, gzSum=0;
+  for(int i=0;i<CAL_N;i++){
+    int16_t ax, ay, az, gx, gy, gz;
+    mpu.getMotion6(&ax,&ay,&az,&gx,&gy,&gz);
+    gxSum += gx; gySum += gy; gzSum += gz;
+    delay(3);
+  }
+  gOffX = dpsFromRaw(gxSum/(float)CAL_N);
+  gOffY = dpsFromRaw(gySum/(float)CAL_N);
+  gOffZ = dpsFromRaw(gzSum/(float)CAL_N);
 
-  int sp1 = base1 - pitchCorrection + rollCorrection; // Front-left
-  int sp2 = base2 - pitchCorrection - rollCorrection; // Front-right
-  int sp3 = base3 + pitchCorrection + rollCorrection; // Back-left
-  int sp4 = base4 + pitchCorrection - rollCorrection; // Back-right
+  lastLoop = micros();
+  Serial.println("Ready.");
+}
 
-  // Limit range
-  sp1 = constrain(sp1, 1000, 2000);
-  sp2 = constrain(sp2, 1000, 2000);
-  sp3 = constrain(sp3, 1000, 2000);
-  sp4 = constrain(sp4, 1000, 2000);
+// ================== MAIN LOOP =========================
+void loop(){
+  // keep fixed loop time
+  uint32_t now = micros();
+  if ((uint32_t)(now - lastLoop) < LOOP_US) return;
+  float dt = (now - lastLoop) / 1000000.0f;
+  lastLoop = now;
 
-  // Send to motors
+  // --- Read IMU ---
+  int16_t ax, ay, az, gx, gy, gz;
+  mpu.getMotion6(&ax,&ay,&az,&gx,&gy,&gz);
+
+  // Gyro rates (dps) with offsets
+  float gyroX = dpsFromRaw(gx) - gOffX;  // roll rate   (about X)
+  float gyroY = dpsFromRaw(gy) - gOffY;  // pitch rate  (about Y)
+  // float gyroZ = dpsFromRaw(gz) - gOffZ;  // yaw rate (unused in this simple mixer)
+
+  // Integrate gyro
+  gyroRoll  += gyroX * dt;
+  gyroPitch += gyroY * dt;
+
+  // Accelerometer angles (degrees)
+  float axg = gFromRaw(ax), ayg = gFromRaw(ay), azg = gFromRaw(az);
+  // Guard against div0 with small epsilon
+  float accRoll  = atan2f(ayg, sqrtf(axg*axg + azg*azg)) * 180.0f/PI;
+  float accPitch = atan2f(axg, sqrtf(ayg*ayg + azg*azg)) * 180.0f/PI;
+
+  // Complementary filter
+  roll  = ALPHA*(roll  + gyroX*dt) + (1.0f-ALPHA)*accRoll;
+  pitch = ALPHA*(pitch + gyroY*dt) + (1.0f-ALPHA)*accPitch;
+
+  // --- Read RC ---
+  uint16_t usRoll     = rcValue[0];   // 1000..2000
+  uint16_t usPitch    = rcValue[1];
+  uint16_t usThrottle = rcValue[2];
+  uint16_t usYaw      = rcValue[3];
+
+  // Basic signal validity
+  usRoll     = constraini(usRoll,  900, 2100);
+  usPitch    = constraini(usPitch, 900, 2100);
+  usThrottle = constraini(usThrottle, 900, 2100);
+  usYaw      = constraini(usYaw,  900, 2100);
+
+  // Map sticks to target angles
+  float targetRoll  = mapStickToAngle(usRoll);
+  float targetPitch = mapStickToAngle(usPitch);
+
+  // Throttle
+  int baseThrottle = constraini(usThrottle, MIN_US, MAX_US);
+
+  // --- PID controllers (Angle mode) ---
+  float rollErr  = targetRoll  - roll;
+  float pitchErr = targetPitch - pitch;
+
+  iRoll  += rollErr  * dt;
+  iPitch += pitchErr * dt;
+
+  // Anti-windup: limit integrator
+  iRoll  = constrainf(iRoll,  -50.0f, 50.0f);
+  iPitch = constrainf(iPitch, -50.0f, 50.0f);
+
+  float dRoll  = (rollErr  - prevRollErr)  / dt;
+  float dPitch = (pitchErr - prevPitchErr) / dt;
+
+  float rollOut  = Kp*rollErr  + Ki*iRoll  + Kd*dRoll;
+  float pitchOut = Kp*pitchErr + Ki*iPitch + Kd*dPitch;
+
+  prevRollErr  = rollErr;
+  prevPitchErr = pitchErr;
+
+  // Optional simple yaw: mix small differential based on stick
+  int yawAmount = map(usYaw, 1000, 2000, -150, 150);
+
+  // --- Mixer (X configuration) ---
+  // Base is throttle; add/subtract PID corrections
+  int sp1 = baseThrottle - pitchOut + rollOut  + yawAmount; // Front Left  (m1)
+  int sp2 = baseThrottle - pitchOut - rollOut  - yawAmount; // Front Right (m2)
+  int sp3 = baseThrottle + pitchOut + rollOut  - yawAmount; // Back  Left  (m3)
+  int sp4 = baseThrottle + pitchOut - rollOut  + yawAmount; // Back  Right (m4)
+
+  // Constrain to ESC range
+  sp1 = constraini(sp1, MIN_US, MAX_US);
+  sp2 = constraini(sp2, MIN_US, MAX_US);
+  sp3 = constraini(sp3, MIN_US, MAX_US);
+  sp4 = constraini(sp4, MIN_US, MAX_US);
+
+  // Motor cutoff if throttle very low (disarm feel)
+  if (usThrottle < 1050){
+    sp1 = sp2 = sp3 = sp4 = MIN_US;
+    // bleed integrators to avoid jump
+    iRoll *= 0.98f; iPitch *= 0.98f;
+  }
+
+  // --- Output to motors (at ~250 Hz) ---
   m1.writeMicroseconds(sp1);
   m2.writeMicroseconds(sp2);
   m3.writeMicroseconds(sp3);
   m4.writeMicroseconds(sp4);
 
-  // Debug output
-  Serial.print("Pitch: "); Serial.print(pitch);
-  Serial.print(" | Roll: "); Serial.print(roll);
-  Serial.print(" | Motors: ");
-  Serial.print(sp1); Serial.print(", ");
-  Serial.print(sp2); Serial.print(", ");
-  Serial.print(sp3); Serial.print(", ");
-  Serial.println(sp4);
-
-  delay(5); // Faster loop for better stability
+  // Uncomment for debug at lower rate
+  // static uint32_t tdbg=0; if (now-tdbg>100000){ tdbg=now;
+  //   Serial.print("R:"); Serial.print(roll); Serial.print(" P:"); Serial.print(pitch);
+  //   Serial.print(" | TR:"); Serial.print(targetRoll); Serial.print(" TP:"); Serial.print(targetPitch);
+  //   Serial.print(" | Th:"); Serial.print(baseThrottle);
+  //   Serial.print(" | m:"); Serial.print(sp1); Serial.print(","); Serial.print(sp2);
+  //   Serial.print(","); Serial.print(sp3); Serial.print(","); Serial.println(sp4);
+  // }
 }
