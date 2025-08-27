@@ -91,10 +91,10 @@ void setup() {
   m4.attach(dm4);
 
   // Arm ESCs
-  m1.write(1000);
-  m2.write(1000);
-  m3.write(1000);
-  m4.write(1000);
+  m1.writeMicroseconds(1000);
+  m2.writeMicroseconds(1000);
+  m3.writeMicroseconds(1000);
+  m4.writeMicroseconds(1000);
   delay(2000);
 
   // Attach interrupts for RC
@@ -116,6 +116,12 @@ void setup() {
     delay(5);
   }
   accZ_offset = azsum / n;
+//   for(int i = 0; i<5; i++){
+//     m1.writeMicroseconds(2000);
+//   m2.writeMicroseconds(2000);
+//   m3.writeMicroseconds(2000);
+//   m4.writeMicroseconds(2000);
+//   }
 }
 
 void loop() {
@@ -236,10 +242,10 @@ void loop() {
   static unsigned long lastMotorUpdate = 0;
   if (now - lastMotorUpdate >= 20000) { // every 20 ms
     lastMotorUpdate = now;
-    m1.write(sp1);
-    m2.write(sp2);
-    m3.write(sp3);
-    m4.write(sp4);
+    m1.writeMicroseconds(sp1);
+    m2.writeMicroseconds(sp2);
+    m3.writeMicroseconds(sp3);
+    m4.writeMicroseconds(sp4);
   }
 
   // Optional: print debug info
