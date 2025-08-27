@@ -86,6 +86,17 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(bsig), rcISR3, CHANGE);
 
   lastTime = micros();
+  // ===== Tiny startup lift =====
+  int startupThrust = 1200;  // slightly above idle (1000 = min)
+  unsigned long startTime = micros();
+  while (micros() - startTime < 200000) { // 0.2 seconds
+      m1.writeMicroseconds(startupThrust);
+      m2.writeMicroseconds(startupThrust);
+      m3.writeMicroseconds(startupThrust);
+      m4.writeMicroseconds(startupThrust);
+      delay(20); // ~50 Hz
+  }
+
 }
 
 void loop() {
