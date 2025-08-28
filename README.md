@@ -1,3 +1,4 @@
+![Cover photo of ICT club of NJBS (7).png](Cover_photo_of_ICT_club_of_NJBS_(7).png)
 # 📘 Quadcopter Drone Project – ICT Club of NJBS
 
 ## 🎯 Executive Summary
