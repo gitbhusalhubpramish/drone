@@ -1,96 +1,137 @@
-Markdown Live Preview
-Reset
-Copy
+# 📘 Quadcopter Drone Project – ICT Club of NJBS
 
-398399400401402403404405406407408409410411412413414415416417418419420421422423424425
+## 🎯 Executive Summary
 
-**Project Details:**
+This project is an initiative by the **ICT Club of NJBS** to design, build, and test a **quadcopter drone** using **Arduino Uno, ESCs, BLDC motors, an RC receiver, and an MPU6050 IMU sensor**.
 
-- **Institution:** Nawa Jyoti English Boarding School, Tilottama-8, Charnumber
-- **Club:** ICT Club of NJBS
-- **Date:** August 2025
-- **Motto:** *"Innovation through Collaboration"*
-</aside>
-📘 Quadcopter Drone Project – ICT Club of NJBS
-🎯 Executive Summary
-This project is an initiative by the ICT Club of NJBS to design, build, and test a quadcopter drone using Arduino Uno, ESCs, BLDC motors, an RC receiver, and an MPU6050 IMU sensor.
+The drone demonstrates how school-level students can explore **STEM (Science, Technology, Engineering, Mathematics)** by integrating **electronics, programming, and aerodynamics**. The project not only focuses on building a functional drone but also aims to **inspire creativity, teamwork, and problem-solving** among ICT club members.
 
-The drone demonstrates how school-level students can explore STEM (Science, Technology, Engineering, Mathematics) by integrating electronics, programming, and aerodynamics. The project not only focuses on building a functional drone but also aims to inspire creativity, teamwork, and problem-solving among ICT club members.
+---
 
-👥 Team & Credits
-Supervision & Guidance
-Rajendra Pantha – Project Supervisor & Guide
-Leadership
-Pramish Bhusal – Project Coordinator
-Hardware Assembly
-Sangam Kunwar – Hardware Assembler
-Abishek Dhakal – Hardware Assembler
-Support & Documentation
-Sugam Bhusal – Support & Documentation
-Madhu Kunwar – Support & Documentation
-Documentation Assistants
-Puspa Bhattrai – Documentation Assistant
-Sonakshi Ranpal – Documentation Assistant
-Nischal Dhakal – Documentation Assistant
-Support Assistants
-Kishore Poudel – Support Assistant
-Sagar Ale Magar – Support Assistant
-Group photo of ICT club of NJBS.jpg
+## 👥 Team & Credits
 
-🎯 Project Overview
-Objective
-The primary goal of this project is to build a functional quadcopter drone controlled via an RC transmitter and receiver, using an Arduino Uno as the flight control unit.
+### **Supervision & Guidance**
 
-Scope
-To design and assemble the drone frame and hardware components
-To integrate sensors and electronics for balance and control
-To develop Arduino code for motor control and sensor data processing
-To perform testing, troubleshooting, and safe flight trials
-Expected Outcomes
-A working quadcopter capable of stable manual flight
-Detailed documentation for future ICT club batches
-A foundation for future projects (autonomous drones, GPS navigation, camera integration)
-📦 Bill of Materials (BOM)
-Component	Quantity	Description / Notes	Approx. Cost (NPR)
-Arduino Uno R3	1	Main flight controller	1,500
-ESC 30A	4	Electronic speed controllers	4,000 (set of 4)
-BLDC Motors (1000KV)	4	Propulsion system	5,000 (set of 4)
-Propellers (10x4.5)	4	CW and CCW pair	1,000
-RC Transmitter & Rx	1 set	4-channel RC system	7,000
-MPU6050 IMU	1	Gyroscope & accelerometer sensor	500
-LiPo Battery (35C 2200mAh)	1	Power supply	3,500
-Total Estimated Cost: ~28,000–30,000 NPR
+- **Rajendra Pantha** – Project Supervisor & Guide
 
-🔧 Hardware Design
-Frame Configuration
-Frame: 450mm quadcopter frame (X configuration)
-Motor Layout:
-M1 – Front Left (CW)
-M2 – Front Right (CCW)
-M3 – Back Left (CCW)
-M4 – Back Right (CW)
-Electronics Placement:
-Arduino + MPU6050 mounted centrally for balance
-ESCs fixed on arms for cooling
-Battery mounted at the bottom with strap
-Receiver fixed on top frame
-⚡ Electronics & Schematics
-Wiring Diagram
+### **Leadership**
+
+- **Pramish Bhusal** – Project Coordinator
+
+### **Hardware Assembly**
+
+- **Sangam Kunwar** – Hardware Assembler
+- **Abishek Dhakal** – Hardware Assembler
+
+### **Support & Documentation**
+
+- **Sugam Bhusal** – Support & Documentation
+- **Madhu Kunwar** – Support & Documentation
+
+### **Documentation Assistants**
+
+- **Puspa Bhattrai** – Documentation Assistant
+- **Sonakshi Ranpal** – Documentation Assistant
+- **Nischal Dhakal** – Documentation Assistant
+
+### **Support Assistants**
+
+- **Kishore Poudel** – Support Assistant
+- **Sagar Ale Magar** – Support Assistant
+
+![Group photo of ICT club of NJBS.jpg](Group_photo_of_ICT_club_of_NJBS.jpg)
+
+---
+
+## 🎯 Project Overview
+
+### **Objective**
+
+The primary goal of this project is to build a **functional quadcopter drone** controlled via an **RC transmitter and receiver**, using an **Arduino Uno** as the flight control unit.
+
+### **Scope**
+
+- To design and assemble the drone frame and hardware components
+- To integrate sensors and electronics for balance and control
+- To develop Arduino code for motor control and sensor data processing
+- To perform testing, troubleshooting, and safe flight trials
+
+### **Expected Outcomes**
+
+- A working quadcopter capable of stable manual flight
+- Detailed documentation for future ICT club batches
+- A foundation for future projects (autonomous drones, GPS navigation, camera integration)
+
+---
+
+## 📦 Bill of Materials (BOM)
+
+| **Component** | **Quantity** | **Description / Notes** | **Approx. Cost (NPR)** |
+| --- | --- | --- | --- |
+| Arduino Uno R3 | 1 | Main flight controller | 1,500 |
+| ESC 30A | 4 | Electronic speed controllers | 4,000 (set of 4) |
+| BLDC Motors (1000KV) | 4 | Propulsion system | 5,000 (set of 4) |
+| Propellers (10x4.5) | 4 | CW and CCW pair | 1,000 |
+| RC Transmitter & Rx | 1 set | 4-channel RC system | 7,000 |
+| MPU6050 IMU | 1 | Gyroscope & accelerometer sensor | 500 |
+| LiPo Battery (35C 2200mAh) | 1 | Power supply | 3,500 |
+
+**Total Estimated Cost: ~28,000–30,000 NPR**
+
+---
+
+## 🔧 Hardware Design
+
+### **Frame Configuration**
+
+- **Frame:** 450mm quadcopter frame (X configuration)
+
+### **Motor Layout:**
+
+- **M1** – Front Left (CW)
+- **M2** – Front Right (CCW)
+- **M3** – Back Left (CCW)
+- **M4** – Back Right (CW)
+
+### **Electronics Placement:**
+
+- Arduino + MPU6050 mounted centrally for balance
+- ESCs fixed on arms for cooling
+- Battery mounted at the bottom with strap
+- Receiver fixed on top frame
+
+---
+
+## ⚡ Electronics & Schematics
+
+### **Wiring Diagram**
+
+<aside>
 🔌
-Connection Overview:
 
-RC Receiver → Arduino Analog Pins (A1–A4)
-Arduino Digital Pins (3, 5, 6, 9) → ESC signal inputs
-ESCs → BLDC Motors
-LiPo Battery → Power Distribution Board → ESCs + Arduino (via 5V BEC)
-MPU6050 → Arduino I2C (SDA/SCL on A4/A5)
-💻 Software
-Overview
-Reads RC receiver PWM signals
-Controls ESCs using Arduino Servo library
-Reads IMU data (acceleration, gyro) from MPU6050
-Logs outputs for debugging via Serial Monitor
-Example Arduino Code (Safe Test)
+**Connection Overview:**
+
+- RC Receiver → Arduino Analog Pins (A1–A4)
+- Arduino Digital Pins (3, 5, 6, 9) → ESC signal inputs
+- ESCs → BLDC Motors
+- LiPo Battery → Power Distribution Board → ESCs + Arduino (via 5V BEC)
+- MPU6050 → Arduino I2C (SDA/SCL on A4/A5)
+</aside>
+
+---
+
+## 💻 Software
+
+### **Overview**
+
+- Reads RC receiver PWM signals
+- Controls ESCs using Arduino Servo library
+- Reads IMU data (acceleration, gyro) from MPU6050
+- Logs outputs for debugging via Serial Monitor
+
+### **Example Arduino Code (Safe Test)**
+
+```cpp
 #include <Wire.h>
 #include <MPU6050.h>
 #include <Servo.h>
@@ -308,42 +349,77 @@ void loop(){
         m4.writeMicroseconds(sp4);
     }
 }
-🧪 Testing & Safety
-ESC Calibration Process
-Power RC transmitter
-Set throttle to max
-Connect ESC power → wait for beeps
-Lower throttle → ESC calibrated
-Safety Checklist
+```
+
+---
+
+## 🧪 Testing & Safety
+
+### **ESC Calibration Process**
+
+1. Power RC transmitter
+2. Set throttle to max
+3. Connect ESC power → wait for beeps
+4. Lower throttle → ESC calibrated
+
+### **Safety Checklist**
+
+<aside>
 ⚠️
-Critical Safety Measures:
 
-Test without propellers first
-Ensure common ground between ESCs and Arduino
-Secure all wiring with zip ties
-Keep a fire extinguisher nearby when testing batteries
-🔧 Troubleshooting
-Issue	Possible Cause	Solution
-Two motors not spinning	Incorrect wiring / ESC not armed	Check wiring, re-calibrate ESCs
-Drone unstable in flight	Wrong propeller orientation	Check CW/CCW propellers
-No RC signal detected	Wrong receiver wiring	Verify VCC, GND, signal pins
-📊 Results & Observations
-Successful bench testing with motor control from RC input
-MPU6050 provides stable sensor data
-Flight test: This image captures the first testing phase of our quadcopter drone. The drone is placed on the floor and powered on with all four BLDC motors spinning. A team member is seen holding the frame lightly to prevent uncontrolled lift-off during initial stability testing.
-testing photo of drone.png
+**Critical Safety Measures:**
 
-🙏 Acknowledgements
-We express our sincere gratitude to Nawa Jyoti English Baording School and ICT Club of NJBS for providing resources and guidance. Special thanks to Rajendra Pantha Sir for supervision and encouragement.
+- Test without propellers first
+- Ensure common ground between ESCs and Arduino
+- Secure all wiring with zip ties
+- Keep a fire extinguisher nearby when testing batteries
+</aside>
 
-📋 Appendix
-Full Arduino Code
-Component datasheets
-Flight logs (if available)
+---
+
+## 🔧 Troubleshooting
+
+| **Issue** | **Possible Cause** | **Solution** |
+| --- | --- | --- |
+| Two motors not spinning | Incorrect wiring / ESC not armed | Check wiring, re-calibrate ESCs |
+| Drone unstable in flight | Wrong propeller orientation | Check CW/CCW propellers |
+| No RC signal detected | Wrong receiver wiring | Verify VCC, GND, signal pins |
+
+---
+
+## 📊 Results & Observations
+
+- **Successful bench testing** with motor control from RC input
+- **MPU6050 provides stable sensor data**
+- **Flight test:** This image captures the **first testing phase of our quadcopter drone**. The drone is placed on the floor and powered on with all four BLDC motors spinning. A team member is seen holding the frame lightly to **prevent uncontrolled lift-off during initial stability testing**.
+
+![testing photo of drone.png](testing_photo_of_drone.png)
+
+---
+
+---
+
+## 🙏 Acknowledgements
+
+We express our sincere gratitude to Nawa Jyoti English Baording School and **ICT Club of NJBS** for providing resources and guidance. Special thanks to **Rajendra Pantha Sir** for supervision and encouragement.
+
+---
+
+## 📋 Appendix
+
+- Full Arduino Code
+- Component datasheets
+- Flight logs (if available)
+
+---
+
+<aside>
 🏫
-Project Details:
 
-Institution: Nawa Jyoti English Boarding School, Tilottama-8, Charnumber
-Club: ICT Club of NJBS
-Date: August 2025
-Motto: "Innovation through Collaboration"
+**Project Details:**
+
+- **Institution:** Nawa Jyoti English Boarding School, Tilottama-8, Charnumber
+- **Club:** ICT Club of NJBS
+- **Date:** August 2025
+- **Motto:** *"Innovation through Collaboration"*
+</aside>
