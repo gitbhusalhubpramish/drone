@@ -28,8 +28,9 @@ void rcISR1() { if(digitalRead(lsig)) rcStart[1] = micros(); else rcValue[1] = m
 void rcISR2() { if(digitalRead(fsig)) rcStart[2] = micros(); else rcValue[2] = micros() - rcStart[2]; }
 void rcISR3() { if(digitalRead(bsig)) rcStart[3] = micros(); else rcValue[3] = micros() - rcStart[3]; }
 
-float cmps[3] = {0, 0, 0};
-float ang[3] = {0,0,0};
+float cmps[] = {0, 0, 0};
+float ang[] = {0,0,0};
+int* sp[] = {&mid[0], &mid[1],&mid[2],&mid[3]};
 void setup(){
 Serial.begin(115200);
     Wire.begin();
@@ -75,6 +76,50 @@ void loop(){
       cmps[i] += acc[i]*dt;
       ang[i] += gyroRate[i]*dt;
     }
-
+  if(lclk && rclk && !fclk && !bclk){
+    sp = &lo
+  }
+  else if(fclk && bclk && !lclk && !rclk){
+    sp = &hi
+  }
+  else if(fclk && rclk && !bclk && !lclk){
+    sp[0] = &hi[0];
+    sp[1] = &mid[1];
+    sp[2] = &mid[2];
+    sp[3] = &hi[3];
+  }
+  else if(bclk && lclk && !fclk && !rclk){
+    sp[0] = &mid[0];
+    sp[1] = &hi[1];
+    sp[2] = &hi[2];
+    sp[3] = &mid[3];
+  }
+  else if(fclk && !bclk && !lclk && !rclk){
+    sp[0] = &mid[0];
+    sp[1] = &mid[1];
+    sp[2] = &hi[2];
+    sp[3] = &hi[3];
+  }
+  else if(bclk && !fclk && !lclk && !rclk){
+    sp[0] = &mid[0];
+    sp[1] = &hi[1];
+    sp[2] = &hi[2];
+    sp[3] = &mid[3];
+  }
+  else if(rclk && !lclk && !fclk && !bclk){
+    sp[0] = &hi[0];
+    sp[1] = &mid[1];
+    sp[2] = &hi[2];
+    sp[3] = &mid[3];
+  }
+  else if(lclk && !rclk && !fclk && !bclk){
+    sp[0] = &mid[0];
+    sp[1] = &hi[1];
+    sp[2] = &mid[2];
+    sp[3] = &hi[3];
+  }
+  else{
+    sp = &mid;
+  }
 
 }
