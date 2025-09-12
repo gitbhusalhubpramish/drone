@@ -41,7 +41,6 @@ int deg = 15;
 int mtvl[] = {0,0,0,0};
 void setup(){
 Serial.begin(115200);
-Serial.println("hello");
     Wire.begin();
 
     mpu.initialize();
@@ -154,6 +153,54 @@ void loop(){
   // Corrected way to assign values to the mtvl array
 mtvl[0] = deg * mtn[0];
 mtvl[1] = deg * mtn[1];
-mtvl[2] = deg * mtn[2];
+mtvl[2] = 0.1 * mtn[2];
 mtvl[3] = deg * mtn[3];
+  // Corrected way to print multiple values
+Serial.print(mtvl[0]);
+Serial.print(" ");
+Serial.print(mtvl[1]);
+Serial.print(" ");
+Serial.print(mtvl[2]);
+Serial.print(" ");
+Serial.println(mtvl[3]);
+// === CONTROL LOGIC ===
+// Compute errors
+float e_roll  = mtvl[0] - gyroRate[0];
+float e_pitch = mtvl[1] - gyroRate[1];
+float e_yaw   = mtvl[3] - gyroRate[2];
+float e_alt   = 9.81+mtvl[2] - acc[2];
+
+// Compute efforts
+float u_roll  = Kp * e_roll;
+float u_pitch = Kp * e_pitch;
+float u_yaw   = Kp * e_yaw;
+float u_alt   = Kp * e_alt;
+
+// Mix motors
+int m1_speed = *base[0] + u_alt + u_pitch + u_roll - u_yaw;
+int m2_speed = *base[1] + u_alt + u_pitch - u_roll + u_yaw;
+int m3_speed = *base[2] + u_alt - u_pitch + u_roll + u_yaw;
+int m4_speed = *base[3] + u_alt - u_pitch - u_roll - u_yaw;
+
+// Clamp
+m1_speed = constrain(m1_speed, 1200, 2000);
+m2_speed = constrain(m2_speed, 1200, 2000);
+m3_speed = constrain(m3_speed, 1200, 2000);
+m4_speed = constrain(m4_speed, 1200, 2000);
+
+*base[0] = m1_speed;
+*base[1] = m2_speed;
+*base[2] = m3_speed;
+*base[3] = m4_speed;
+
+
+  static unsigned long lastMotorUpdate = 0;
+  if(now - lastMotorUpdate >= 20000){
+    lastMotorUpdate = now;
+    m1.writeMicroseconds(m1_speed);
+    m2.writeMicroseconds(m2_speed);
+    m3.writeMicroseconds(m3_speed);
+    m4.writeMicroseconds(m4_speed);
+  }
+
 }
