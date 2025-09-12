@@ -23,6 +23,11 @@ int hi[4] = {2000, 2000, 2000, 2000};
 int lo[4] = {1200, 1200, 1200, 1200};
 int mid[4] = {1700, 1700, 1700, 1700};
 
+// ===== RC INPUTS =====
+volatile uint16_t rcValue[4] = {1500, 1500, 1500, 1500};
+volatile uint32_t rcStart[4];
+const uint8_t rcPins[4] = {rsig, lsig, fsig, bsig};
+
 void rcISR0() { if(digitalRead(rsig)) rcStart[0] = micros(); else rcValue[0] = micros() - rcStart[0]; }
 void rcISR1() { if(digitalRead(lsig)) rcStart[1] = micros(); else rcValue[1] = micros() - rcStart[1]; }
 void rcISR2() { if(digitalRead(fsig)) rcStart[2] = micros(); else rcValue[2] = micros() - rcStart[2]; }
@@ -30,13 +35,20 @@ void rcISR3() { if(digitalRead(bsig)) rcStart[3] = micros(); else rcValue[3] = m
 
 float cmps[] = {0, 0, 0};
 float ang[] = {0,0,0};
-int* sp[] = {&mid[0], &mid[1],&mid[2],&mid[3]};
+int* base[] = {&mid[0], &mid[1],&mid[2],&mid[3]};
+
+int deg = 15;
+int mtvl[] = {0,0,0,0};
 void setup(){
 Serial.begin(115200);
+Serial.println("hello");
     Wire.begin();
 
     mpu.initialize();
-    if(!mpu.testConnection()) while(1);
+    if(!mpu.testConnection()){ 
+      Serial.print("no mpu");
+      while(1);
+      }
 
     m1.attach(dm1);
     m2.attach(dm2);
@@ -58,6 +70,7 @@ Serial.begin(115200);
     lastTime = micros();
 }
 void loop(){
+  int mtn[] = {0,0,0,0};//{x, y, z, yaw}
   unsigned long now = micros();
     float dt = (now - lastTime)/1000000.0;
     lastTime = now;
@@ -77,49 +90,70 @@ void loop(){
       ang[i] += gyroRate[i]*dt;
     }
   if(lclk && rclk && !fclk && !bclk){
-    sp = &lo
+    mtn[2] = -1;
+    base[0] = &lo[0];
+    base[1] = &lo[1];
+    base[2] = &lo[2];
+    base[3] = &lo[3];
   }
   else if(fclk && bclk && !lclk && !rclk){
-    sp = &hi
+    mtn[2] = 1;
+    base[0] = &hi[0];
+    base[1] = &hi[1];
+    base[2] = &hi[2];
+    base[3] = &hi[3];
   }
   else if(fclk && rclk && !bclk && !lclk){
-    sp[0] = &hi[0];
-    sp[1] = &mid[1];
-    sp[2] = &mid[2];
-    sp[3] = &hi[3];
+    mtn[3] = 1;
+    base[0] = &mid[0];
+    base[1] = &mid[1];
+    base[2] = &mid[2];
+    base[3] = &mid[3];
   }
   else if(bclk && lclk && !fclk && !rclk){
-    sp[0] = &mid[0];
-    sp[1] = &hi[1];
-    sp[2] = &hi[2];
-    sp[3] = &mid[3];
+    mtn[3] = -1;
+    base[0] = &mid[0];
+    base[1] = &mid[1];
+    base[2] = &mid[2];
+    base[3] = &mid[3];
   }
   else if(fclk && !bclk && !lclk && !rclk){
-    sp[0] = &mid[0];
-    sp[1] = &mid[1];
-    sp[2] = &hi[2];
-    sp[3] = &hi[3];
+    mtn[1] = 1;
+    base[0] = &mid[0];
+    base[1] = &mid[1];
+    base[2] = &mid[2];
+    base[3] = &mid[3];
   }
   else if(bclk && !fclk && !lclk && !rclk){
-    sp[0] = &mid[0];
-    sp[1] = &hi[1];
-    sp[2] = &hi[2];
-    sp[3] = &mid[3];
+    mtn[1] = -1;
+    base[0] = &mid[0];
+    base[1] = &mid[1];
+    base[2] = &mid[2];
+    base[3] = &mid[3];
   }
   else if(rclk && !lclk && !fclk && !bclk){
-    sp[0] = &hi[0];
-    sp[1] = &mid[1];
-    sp[2] = &hi[2];
-    sp[3] = &mid[3];
+    mtn[0] = 1;
+    base[0] = &mid[0];
+    base[1] = &mid[1];
+    base[2] = &mid[2];
+    base[3] = &mid[3];
   }
   else if(lclk && !rclk && !fclk && !bclk){
-    sp[0] = &mid[0];
-    sp[1] = &hi[1];
-    sp[2] = &mid[2];
-    sp[3] = &hi[3];
+    mtn[0] = -1;
+    base[0] = &mid[0];
+    base[1] = &mid[1];
+    base[2] = &mid[2];
+    base[3] = &mid[3];
   }
   else{
-    sp = &mid;
+    base[0] = &mid[0];
+    base[1] = &mid[1];
+    base[2] = &mid[2];
+    base[3] = &mid[3];
   }
-
+  // Corrected way to assign values to the mtvl array
+mtvl[0] = deg * mtn[0];
+mtvl[1] = deg * mtn[1];
+mtvl[2] = deg * mtn[2];
+mtvl[3] = deg * mtn[3];
 }
