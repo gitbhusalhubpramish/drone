@@ -106,9 +106,14 @@ This project not only helps in learning modern technology but also demonstrates 
   - Quantity: 1  
   - Price: 4000  
 
+- **8x4.5" Propellers (x4)**  
+  - Function: Generate thrust for flight movement.  
+  - Quantity: 4 (2 clockwise, 2 counter-clockwise)  
+  - Note: Size optimized for motor and battery specifications  
+
 **Total Cost**  
 4000 (Motors) + 3000 (Arduino) + 2000 (ESCs) + 500 (MPU6050) + 500 (RC set) + 4000 (Battery)  
-**Total = 14,000**  
+**Total = 14,000** (excluding propellers and frame)  
 
 ---
 
@@ -189,7 +194,19 @@ The diagram represents the wiring and control system of a Quadcopter Drone using
    - Upload Arduino flight control code.  
    - Calibrate the MPU6050 sensor and ESCs.  
    - Test motor directions (two should spin clockwise, two counter-clockwise).  
-   - Perform a hover test in a safe, open area.  
+   - **Safety Check**: Remove propellers during initial testing.  
+   - Perform a hover test in a safe, open area only after all systems are verified.  
+
+---
+
+## Safety Considerations  
+
+⚠️ **Important Safety Notes:**  
+- Always remove propellers during code testing and motor calibration  
+- Test in open areas away from people and obstacles  
+- Monitor battery voltage - land when below 10.5V  
+- Ensure proper propeller rotation direction before flight  
+- Keep spare parts available (propellers break easily during learning)  
 
 ---
 
@@ -211,19 +228,20 @@ This Arduino code controls a quadcopter (drone) using an MPU6050 gyro/accelerome
 
 - **MPU6050 Initialization**  
   - Sets up the gyro/accelerometer for reading pitch and roll.  
+  - **Power Management**: Includes battery-friendly power limiting features.  
 
 - **RC Input Processing**  
   - Uses hardware interrupts to measure PWM signals from the radio controller.  
   - Stores incoming values in `rcValue[]`.  
 
 - **Main Control Loop**  
-  - Reads sensor data.  
-  - Calculates pitch and roll with complementary filter.  
-  - Reads RC commands.  
-  - Smooths thrust changes.  
-  - Implements a simple PID controller for altitude.  
-  - Balances motors to compensate drift.  
-  - Outputs calculated speeds to the motors.  
+  - Reads sensor data continuously.  
+  - Calculates pitch and roll with sensor fusion.  
+  - Reads RC commands and interprets pilot input.  
+  - **Smart Power Management**: Automatically adjusts power based on battery condition.  
+  - Implements PID controller for stable flight.  
+  - Balances motors to compensate for drift.  
+  - Outputs calculated speeds to motors at 50Hz update rate.  
 
 - **Flight Control Logic**  
   - Interprets RC commands.  
@@ -257,5 +275,7 @@ LOOP FOREVER:
 
 END LOOP
 ```
-## Summary 
-This code enables a drone to interpret radio commands, self-level using IMU (gyro/accel) data, control altitude, and adjust individual motor outputs for stable and responsive flight. The pseudocode outlines the main logic flow for your report. Let me know if you need a diagram or more details!
+
+## Summary
+
+This code enables a drone to interpret radio commands, self-level using IMU (gyro/accel) data, control altitude, and adjust individual motor outputs for stable and responsive flight. The implementation includes advanced power management features to ensure reliable operation with the specified battery and motor combination. The pseudocode outlines the main logic flow for understanding the flight control system.
