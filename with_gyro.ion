@@ -45,8 +45,8 @@ Serial.begin(115200);
 
     mpu.initialize();
     if(!mpu.testConnection()){ 
-      // Serial.print("no mpu");
-      // while(1);
+      Serial.print("no mpu");
+      while(1);
       }
 
     m1.attach(dm1);
