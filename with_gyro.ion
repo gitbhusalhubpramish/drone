@@ -153,7 +153,7 @@ void loop(){
   // Corrected way to assign values to the mtvl array
 mtvl[0] = ((deg * mtn[0]) -ang[0]);
 mtvl[1] = ((deg * mtn[1]) - ang[1]);
-mtvl[2] = ((0.1 * mtn[2]) - cmps[2]);
+mtvl[2] = ((-0.1 * mtn[2]) - cmps[2]);
 mtvl[3] = ((deg * mtn[3])- ang[2]);
   // Corrected way to print multiple values
 Serial.print(mtvl[0]);
