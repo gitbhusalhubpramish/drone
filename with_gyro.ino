@@ -42,16 +42,18 @@ float gyroPitch = 0, gyroRoll = 0;
 float Kp = 2.0;
 unsigned long lastTime = 0;
 
-// POWER LIMITING SETTINGS - Reduced from original for battery protection
-int hi[4] = {1700, 1700, 1700, 1700};  // Reduced from 2000 to 1700
-int lo[4] = {1200, 1200, 1200, 1200};  // Keep same minimum
-int mid[4] = {1450, 1450, 1450, 1450}; // Reduced from 1700 to 1450
+// OPTIMIZED POWER SETTINGS - Battery-friendly with better performance
+int hi[4] = {1650, 1650, 1650, 1650};  // Optimized: 82.5% max power
+int lo[4] = {1100, 1100, 1100, 1100};  // Optimized: Lower idle for battery saving
+int mid[4] = {1400, 1400, 1400, 1400}; // Optimized: 70% cruise power
 
-// Power management variables
+// Advanced power management variables
 unsigned long startTime;
 bool powerReduced = false;
-int maxAllowedPower = 1700;
-int originalMaxPower = 1700;
+int maxAllowedPower = 1650; // Optimized starting power
+int originalMaxPower = 1650;
+int batteryProtectionLevel = 1500; // Emergency low power mode
+float powerEfficiency = 1.0;       // Dynamic efficiency factor
 
 // ===== RC INPUTS =====
 volatile uint16_t rcValue[4] = {1500, 1500, 1500, 1500};
@@ -94,37 +96,39 @@ int *base[] = {&mid[0], &mid[1], &mid[2], &mid[3]};
 int deg = 15;
 int mtvl[] = {0, 0, 0, 0};
 
-// Power management function
+// OPTIMIZED Power management function with battery protection
 void updatePowerLimits()
 {
     unsigned long runtime = millis() - startTime;
 
-    // After 20 seconds of operation, start reducing max power gradually
-    if (runtime > 20000 && !powerReduced)
+    // Gradual power optimization - starts reducing after 30 seconds instead of 20
+    if (runtime > 30000 && !powerReduced)
     {
-        maxAllowedPower = constrain(maxAllowedPower - 10, 1500, originalMaxPower);
-        // Update all power arrays
+        maxAllowedPower = constrain(maxAllowedPower - 8, 1450, originalMaxPower);
+        // Update power arrays more efficiently
         for (int i = 0; i < 4; i++)
         {
             hi[i] = maxAllowedPower;
-            mid[i] = constrain(mid[i], 1200, maxAllowedPower - 100);
+            mid[i] = constrain(mid[i], 1100, maxAllowedPower - 150); // Better gap management
         }
         powerReduced = true;
-        Serial.print("Power reduced to: ");
+        Serial.print("Optimized power to: ");
         Serial.println(maxAllowedPower);
     }
 
-    // Reset power reduction flag every 45 seconds to allow recovery
-    if (runtime % 45000 < 1000)
+    // Longer recovery cycle - every 60 seconds for better battery health
+    if (runtime % 60000 < 1000)
     {
         powerReduced = false;
+        powerEfficiency = constrain(powerEfficiency + 0.05, 0.8, 1.0); // Gradual efficiency recovery
     }
 
-    // Emergency power reduction if too much continuous high power
+    // OPTIMIZED: Smarter emergency power reduction
     static unsigned long highPowerTime = 0;
     static bool inHighPower = false;
+    static int consecutiveHighPower = 0;
 
-    // Check if we're in high power mode
+    // More intelligent high power detection
     bool currentlyHighPower = (base[0] == &hi[0] || base[1] == &hi[1] ||
                                base[2] == &hi[2] || base[3] == &hi[3]);
 
@@ -132,22 +136,31 @@ void updatePowerLimits()
     {
         highPowerTime = millis();
         inHighPower = true;
+        consecutiveHighPower++;
     }
     else if (!currentlyHighPower)
     {
         inHighPower = false;
+        consecutiveHighPower = max(0, consecutiveHighPower - 1); // Gradual reset
     }
 
-    // If in high power for more than 15 seconds, force reduction
-    if (inHighPower && (millis() - highPowerTime > 15000))
+    // Progressive power reduction based on usage pattern
+    if (inHighPower && (millis() - highPowerTime > 20000)) // Increased from 15s to 20s
     {
-        maxAllowedPower = constrain(maxAllowedPower - 5, 1400, originalMaxPower);
+        int reductionAmount = min(8 + consecutiveHighPower, 15); // Adaptive reduction
+        maxAllowedPower = constrain(maxAllowedPower - reductionAmount, batteryProtectionLevel, originalMaxPower);
+
         for (int i = 0; i < 4; i++)
         {
             hi[i] = maxAllowedPower;
         }
-        Serial.println("Emergency power reduction - cooling down...");
-        inHighPower = false; // Reset to allow recovery
+
+        powerEfficiency *= 0.95; // Reduce efficiency factor
+        Serial.print("Smart power reduction - Level: ");
+        Serial.print(consecutiveHighPower);
+        Serial.print(" Power: ");
+        Serial.println(maxAllowedPower);
+        inHighPower = false;
     }
 }
 
@@ -326,37 +339,56 @@ void loop()
     mtvl[2] = ((-0.1 * mtn[2]) - cmps[2]); // Altitude target
     mtvl[3] = ((deg * mtn[3]) - ang[2]);   // Yaw target
 
-    // ===== PID CONTROL LOGIC =====
+    // ===== OPTIMIZED PID CONTROL LOGIC =====
     // Compute errors
     float e_roll = mtvl[0] - gyroRate[0];
     float e_pitch = mtvl[1] - gyroRate[1];
     float e_yaw = mtvl[3] - gyroRate[2];
     float e_alt = 9.81 + mtvl[2] - acc[2];
 
-    // Compute control efforts (reduced Kp for stability with power limits)
-    float Kp_adjusted = constrain(Kp * (maxAllowedPower / 1700.0), 1.0, 3.0);
-    float u_roll = Kp_adjusted * e_roll;
-    float u_pitch = Kp_adjusted * e_pitch;
-    float u_yaw = Kp_adjusted * e_yaw;
-    float u_alt = Kp_adjusted * e_alt;
+    // OPTIMIZED: Dynamic Kp adjustment with efficiency factor
+    float Kp_base = 1.8; // Slightly reduced base for smoother control
+    float Kp_adjusted = constrain(Kp_base * (maxAllowedPower / 1650.0) * powerEfficiency, 0.8, 2.5);
 
-    // ===== MOTOR MIXING =====
+    // OPTIMIZED: Different gains for different axes (more efficient)
+    float u_roll = Kp_adjusted * e_roll * 0.9;   // Slightly reduced for stability
+    float u_pitch = Kp_adjusted * e_pitch * 0.9; // Slightly reduced for stability
+    float u_yaw = Kp_adjusted * e_yaw * 0.7;     // Reduced yaw gain (saves power)
+    float u_alt = Kp_adjusted * e_alt * 1.1;     // Slightly increased for better altitude hold
+
+    // ===== OPTIMIZED MOTOR MIXING =====
     int m1_speed = *base[0] + u_alt + u_pitch + u_roll - u_yaw;
     int m2_speed = *base[1] + u_alt + u_pitch - u_roll + u_yaw;
     int m3_speed = *base[2] + u_alt - u_pitch + u_roll + u_yaw;
     int m4_speed = *base[3] + u_alt - u_pitch - u_roll - u_yaw;
 
-    // ===== POWER LIMITING & SAFETY =====
-    m1_speed = constrain(m1_speed, 1200, maxAllowedPower);
-    m2_speed = constrain(m2_speed, 1200, maxAllowedPower);
-    m3_speed = constrain(m3_speed, 1200, maxAllowedPower);
-    m4_speed = constrain(m4_speed, 1200, maxAllowedPower);
+    // ===== OPTIMIZED POWER LIMITING & SAFETY =====
+    // Smart constraining with battery protection
+    int minSafeSpeed = 1100;
+    m1_speed = constrain(m1_speed, minSafeSpeed, maxAllowedPower);
+    m2_speed = constrain(m2_speed, minSafeSpeed, maxAllowedPower);
+    m3_speed = constrain(m3_speed, minSafeSpeed, maxAllowedPower);
+    m4_speed = constrain(m4_speed, minSafeSpeed, maxAllowedPower);
 
-    // Update base speeds for next iteration
-    *base[0] = constrain(*base[0], 1200, maxAllowedPower);
-    *base[1] = constrain(*base[1], 1200, maxAllowedPower);
-    *base[2] = constrain(*base[2], 1200, maxAllowedPower);
-    *base[3] = constrain(*base[3], 1200, maxAllowedPower);
+    // OPTIMIZED: Smooth power transitions to reduce battery stress
+    static int prev_m1 = 1400, prev_m2 = 1400, prev_m3 = 1400, prev_m4 = 1400;
+    int maxChange = 15; // Limit sudden changes
+
+    m1_speed = constrain(m1_speed, prev_m1 - maxChange, prev_m1 + maxChange);
+    m2_speed = constrain(m2_speed, prev_m2 - maxChange, prev_m2 + maxChange);
+    m3_speed = constrain(m3_speed, prev_m3 - maxChange, prev_m3 + maxChange);
+    m4_speed = constrain(m4_speed, prev_m4 - maxChange, prev_m4 + maxChange);
+
+    prev_m1 = m1_speed;
+    prev_m2 = m2_speed;
+    prev_m3 = m3_speed;
+    prev_m4 = m4_speed;
+
+    // Update base speeds efficiently
+    *base[0] = constrain(*base[0], minSafeSpeed, maxAllowedPower);
+    *base[1] = constrain(*base[1], minSafeSpeed, maxAllowedPower);
+    *base[2] = constrain(*base[2], minSafeSpeed, maxAllowedPower);
+    *base[3] = constrain(*base[3], minSafeSpeed, maxAllowedPower);
 
     // ===== MOTOR OUTPUT =====
     static unsigned long lastMotorUpdate = 0;
@@ -369,31 +401,25 @@ void loop()
         m4.writeMicroseconds(m4_speed);
     }
 
-    // ===== DEBUG OUTPUT =====
+    // ===== OPTIMIZED DEBUG OUTPUT =====
     static unsigned long lastDebugPrint = 0;
-    if (millis() - lastDebugPrint > 2000)
-    { // Every 2 seconds
+    if (millis() - lastDebugPrint > 3000)
+    { // Every 3 seconds (reduced frequency saves processing)
         lastDebugPrint = millis();
-        Serial.print("Runtime: ");
+        Serial.print("⚡Runtime: ");
         Serial.print((millis() - startTime) / 1000);
-        Serial.print("s | ");
-        Serial.print("Max Power: ");
+        Serial.print("s | Power: ");
         Serial.print(maxAllowedPower);
-        Serial.print(" | ");
-        Serial.print("Motors: ");
+        Serial.print("/1650 | Efficiency: ");
+        Serial.print(powerEfficiency * 100, 0);
+        Serial.print("% | Motors: [");
         Serial.print(m1_speed);
-        Serial.print(" ");
+        Serial.print(",");
         Serial.print(m2_speed);
-        Serial.print(" ");
+        Serial.print(",");
         Serial.print(m3_speed);
-        Serial.print(" ");
+        Serial.print(",");
         Serial.print(m4_speed);
-        Serial.print(" | ");
-        Serial.print("Gyro: ");
-        Serial.print(gyroRate[0]);
-        Serial.print(" ");
-        Serial.print(gyroRate[1]);
-        Serial.print(" ");
-        Serial.println(gyroRate[2]);
+        Serial.println("]");
     }
 }
