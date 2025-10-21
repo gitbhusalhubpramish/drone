@@ -19,17 +19,15 @@ float gyroPitch = 0, gyroRoll = 0;
 float Kp = 2.0;
 unsigned long lastTime = 0;
 
-float Ki = 0.5;  // small integral gain
-float Kd = 0.1;  // small derivative gain
-
-float integral[4] = {0,0,0,0};      // roll, pitch, yaw, alt
+float Ki = 0.5;
+float Kd = 0.1;
+float integral[4] = {0,0,0,0};
 float prev_error[4] = {0,0,0,0};
 
 int hi[4] = {2000, 2000, 2000, 2000};
 int lo[4] = {1200, 1200, 1200, 1200};
 int mid[4] = {1700, 1700, 1700, 1700};
 
-// ===== RC INPUTS =====
 volatile uint16_t rcValue[4] = {1500, 1500, 1500, 1500};
 volatile uint32_t rcStart[4];
 const uint8_t rcPins[4] = {rsig, lsig, fsig, bsig};
@@ -41,188 +39,79 @@ void rcISR3() { if(digitalRead(bsig)) rcStart[3] = micros(); else rcValue[3] = m
 
 float cmps[] = {0, 0, 0};
 float ang[] = {0,0,0};
-int* base[] = {&mid[0], &mid[1],&mid[2],&mid[3]};
-
+int* base[] = {&mid[0], &mid[1], &mid[2], &mid[3]};
 int deg = 15;
 int mtvl[] = {0,0,0,0};
+
+float rampTime = 2.0;
+float smoothed_m1 = 1000.0, smoothed_m2 = 1000.0, smoothed_m3 = 1000.0, smoothed_m4 = 1000.0;
+
 void setup(){
-Serial.begin(115200);
-    Wire.begin();
+  Serial.begin(115200);
+  Wire.begin();
+  mpu.initialize();
+  if(!mpu.testConnection()){ Serial.print("no mpu"); while(1); }
 
-    mpu.initialize();
-    if(!mpu.testConnection()){ 
-      Serial.print("no mpu");
-      while(1);
-      }
+  m1.attach(dm1); m2.attach(dm2); m3.attach(dm3); m4.attach(dm4);
 
-    m1.attach(dm1);
-    m2.attach(dm2);
-    m3.attach(dm3);
-    m4.attach(dm4);
+  m1.writeMicroseconds(1000); m2.writeMicroseconds(1000); m3.writeMicroseconds(1000); m4.writeMicroseconds(1000);
 
-    // Arm ESCs
-    m1.writeMicroseconds(1000);
-    m2.writeMicroseconds(1000);
-    m3.writeMicroseconds(1000);
-    m4.writeMicroseconds(1000);
-
-    // Attach interrupts
-    attachInterrupt(digitalPinToInterrupt(rsig), rcISR0, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(lsig), rcISR1, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(fsig), rcISR2, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(bsig), rcISR3, CHANGE);
-    delay(2000);
-    lastTime = micros();
+  attachInterrupt(digitalPinToInterrupt(rsig), rcISR0, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(lsig), rcISR1, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(fsig), rcISR2, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(bsig), rcISR3, CHANGE);
+  delay(2000);
+  lastTime = micros();
 }
+
 void loop(){
-  int mtn[] = {0,0,0,0};//{x, y, z, yaw}
+  int mtn[] = {0,0,0,0};
   unsigned long now = micros();
-    float dt = (now - lastTime)/1000000.0;
-    lastTime = now;
-    // ===== RC BUTTON STATES =====
-    bool rclk = rcValue[0] > 1700;
-    bool lclk = rcValue[1] > 1700;
-    bool fclk = rcValue[2] > 1700;
-    bool bclk = rcValue[3] > 1700;
-    // ===== MPU READ =====
-    int16_t ax, ay, az, gx, gy, gz;
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  float dt = (now - lastTime)/1000000.0;
+  lastTime = now;
 
-    float gyroRate[3] = {gx/131.0, gy/131.0, gz/131.0};
-    float acc[3] = {(ax/16384)*9.81, (ay/16384)*9.81,(az/16384)*9.81};
-    for(int i=0; i<3; i++){
-      cmps[i] += acc[i]*dt;
-      ang[i] += gyroRate[i]*dt;
-    }
-  if(lclk && rclk && !fclk && !bclk){
-    mtn[2] = -1;
-    base[0] = &lo[0];
-    base[1] = &lo[1];
-    base[2] = &lo[2];
-    base[3] = &lo[3];
-  }
-  else if(fclk && bclk && !lclk && !rclk){
-    mtn[2] = 1;
-    base[0] = &hi[0];
-    base[1] = &hi[1];
-    base[2] = &hi[2];
-    base[3] = &hi[3];
-  }
-  else if(fclk && rclk && !bclk && !lclk){
-    mtn[3] = 1;
-    base[0] = &mid[0];
-    base[1] = &mid[1];
-    base[2] = &mid[2];
-    base[3] = &mid[3];
-  }
-  else if(bclk && lclk && !fclk && !rclk){
-    mtn[3] = -1;
-    base[0] = &mid[0];
-    base[1] = &mid[1];
-    base[2] = &mid[2];
-    base[3] = &mid[3];
-  }
-  else if(fclk && !bclk && !lclk && !rclk){
-    mtn[1] = 1;
-    base[0] = &mid[0];
-    base[1] = &mid[1];
-    base[2] = &mid[2];
-    base[3] = &mid[3];
-  }
-  else if(bclk && !fclk && !lclk && !rclk){
-    mtn[1] = -1;
-    base[0] = &mid[0];
-    base[1] = &mid[1];
-    base[2] = &mid[2];
-    base[3] = &mid[3];
-  }
-  else if(rclk && !lclk && !fclk && !bclk){
-    mtn[0] = 1;
-    base[0] = &mid[0];
-    base[1] = &mid[1];
-    base[2] = &mid[2];
-    base[3] = &mid[3];
-  }
-  else if(lclk && !rclk && !fclk && !bclk){
-    mtn[0] = -1;
-    base[0] = &mid[0];
-    base[1] = &mid[1];
-    base[2] = &mid[2];
-    base[3] = &mid[3];
-  }
-  else{
-    base[0] = &mid[0];
-    base[1] = &mid[1];
-    base[2] = &mid[2];
-    base[3] = &mid[3];
-  }
-  // Corrected way to assign values to the mtvl array
-mtvl[0] = ((deg * mtn[0]) -ang[0]);
-mtvl[1] = ((deg * mtn[1]) - ang[1]);
-mtvl[2] = ((-0.1 * mtn[2]) - cmps[2]);
-mtvl[3] = ((deg * mtn[3])- ang[2]);
-  // Corrected way to print multiple values
-Serial.print(mtvl[0]);
-Serial.print(" ");
-Serial.print(mtvl[1]);
-Serial.print(" ");
-Serial.print(mtvl[2]);
-Serial.print(" ");
-Serial.println(mtvl[3]);
-// === CONTROL LOGIC ===
-// Compute errors
-float e_roll  = mtvl[0] - gyroRate[0];
-float e_pitch = mtvl[1] - gyroRate[1];
-float e_yaw   = mtvl[3] - gyroRate[2];
-float e_alt   = 9.81+mtvl[2] - acc[2];
+  bool rclk = rcValue[0] > 1700;
+  bool lclk = rcValue[1] > 1700;
+  bool fclk = rcValue[2] > 1700;
+  bool bclk = rcValue[3] > 1700;
 
-float errors[4] = {e_roll, e_pitch, e_yaw, e_alt};
+  int16_t ax, ay, az, gx, gy, gz;
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  float gyroRate[3] = {gx/131.0, gy/131.0, gz/131.0};
+  float acc[3] = {(ax/16384.0)*9.81, (ay/16384.0)*9.81,(az/16384.0)*9.81};
+  for(int i=0;i<3;i++){ cmps[i] += acc[i]*dt; ang[i] += gyroRate[i]*dt; }
 
-float u[4]; // roll, pitch, yaw, altitude
-for(int i=0; i<4; i++){
-    integral[i] += errors[i] * dt;               // Integral term
-    float derivative = (errors[i] - prev_error[i]) / dt;  // Derivative term
-    u[i] = Kp*errors[i] + Ki*integral[i] + Kd*derivative;
-    prev_error[i] = errors[i];                   // save previous error
-}
+  if(lclk && rclk && !fclk && !bclk){ mtn[2] = -1; base[0]=&lo[0]; base[1]=&lo[1]; base[2]=&lo[2]; base[3]=&lo[3]; }
+  else if(fclk && bclk && !lclk && !rclk){ mtn[2]=1; base[0]=&hi[0]; base[1]=&hi[1]; base[2]=&hi[2]; base[3]=&hi[3]; }
+  else{ base[0]=&mid[0]; base[1]=&mid[1]; base[2]=&mid[2]; base[3]=&mid[3]; }
 
-// Assign to variables for clarity
-float u_roll  = u[0];
-float u_pitch = u[1];
-float u_yaw   = u[2];
-float u_alt   = u[3];
+  mtvl[0]=(deg*mtn[0])-ang[0]; mtvl[1]=(deg*mtn[1])-ang[1]; mtvl[2]=(-0.1*mtn[2])-cmps[2]; mtvl[3]=(deg*mtn[3])-ang[2];
 
-// Compute efforts
-// float u_roll  = Kp * e_roll;
-// float u_pitch = Kp * e_pitch;
-// float u_yaw   = Kp * e_yaw;
-// float u_alt   = Kp * e_alt;
+  float e_roll=mtvl[0]-gyroRate[0], e_pitch=mtvl[1]-gyroRate[1], e_yaw=mtvl[3]-gyroRate[2], e_alt=9.81+mtvl[2]-acc[2];
+  float errors[4]={e_roll,e_pitch,e_yaw,e_alt}, u[4];
+  for(int i=0;i<4;i++){ integral[i]+=errors[i]*dt; float d=(errors[i]-prev_error[i])/dt; u[i]=Kp*errors[i]+Ki*integral[i]+Kd*d; prev_error[i]=errors[i]; }
 
-// Mix motors
-int m1_speed = *base[0] + u_alt + u_pitch + u_roll - u_yaw;
-int m2_speed = *base[1] + u_alt + u_pitch - u_roll + u_yaw;
-int m3_speed = *base[2] + u_alt - u_pitch + u_roll + u_yaw;
-int m4_speed = *base[3] + u_alt - u_pitch - u_roll - u_yaw;
+  int m1_speed_target=*base[0]+u[3]+u[1]+u[0]-u[2];
+  int m2_speed_target=*base[1]+u[3]+u[1]-u[0]+u[2];
+  int m3_speed_target=*base[2]+u[3]-u[1]+u[0]+u[2];
+  int m4_speed_target=*base[3]+u[3]-u[1]-u[0]-u[2];
 
-// Clamp
-m1_speed = constrain(m1_speed, 1200, 2000);
-m2_speed = constrain(m2_speed, 1200, 2000);
-m3_speed = constrain(m3_speed, 1200, 2000);
-m4_speed = constrain(m4_speed, 1200, 2000);
+  m1_speed_target=constrain(m1_speed_target,1200,2000);
+  m2_speed_target=constrain(m2_speed_target,1200,2000);
+  m3_speed_target=constrain(m3_speed_target,1200,2000);
+  m4_speed_target=constrain(m4_speed_target,1200,2000);
 
-*base[0] = m1_speed;
-*base[1] = m2_speed;
-*base[2] = m3_speed;
-*base[3] = m4_speed;
+  float alpha=dt/rampTime; if(alpha>1.0) alpha=1.0;
+  smoothed_m1+=(m1_speed_target-smoothed_m1)*alpha;
+  smoothed_m2+=(m2_speed_target-smoothed_m2)*alpha;
+  smoothed_m3+=(m3_speed_target-smoothed_m3)*alpha;
+  smoothed_m4+=(m4_speed_target-smoothed_m4)*alpha;
 
+  smoothed_m1=constrain(smoothed_m1,1200,2000);
+  smoothed_m2=constrain(smoothed_m2,1200,2000);
+  smoothed_m3=constrain(smoothed_m3,1200,2000);
+  smoothed_m4=constrain(smoothed_m4,1200,2000);
 
-  static unsigned long lastMotorUpdate = 0;
-  if(now - lastMotorUpdate >= 20000){
-    lastMotorUpdate = now;
-    m1.writeMicroseconds(m1_speed);
-    m2.writeMicroseconds(m2_speed);
-    m3.writeMicroseconds(m3_speed);
-    m4.writeMicroseconds(m4_speed);
-  }
-
+  static unsigned long lastMotorUpdate=0;
+  if(now-lastMotorUpdate>=20000){ lastMotorUpdate=now; m1.writeMicroseconds((int)smoothed_m1); m2.writeMicroseconds((int)smoothed_m2); m3.writeMicroseconds((int)smoothed_m3); m4.writeMicroseconds((int)smoothed_m4); }
 }
